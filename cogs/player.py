@@ -30,15 +30,14 @@ def parseSec(sec):
 
 
 class CustomPlayer(wavelink.Player):
-  def __init__(self) -> None:
-    super().__init__()
-    self.queue = wavelink.Queue()
+  pass
 
 
 class Player(commands.Cog):
   def __init__(self, bot: commands.Bot):
     self.bot = bot
-    self.id = 0
+    self.guild_id = {}
+    self.message_id = {}
     self.now_playing_id = 0
     self.synced = False
     super().__init__()
@@ -55,20 +54,22 @@ class Player(commands.Cog):
   )
 
   @commands.Cog.listener()
-  async def on_wavelink_track_start(self, player: CustomPlayer, track: wavelink.Track):
-    channel = self.bot.get_channel(self.id)
+  async def on_wavelink_track_start(self, player: wavelink.Player, track: wavelink.Track):
+    channel = self.bot.get_channel(self.guild_id[player.guild.id])
     embed = discord.Embed(
       title="Now Playing",
       color=int(self.Response_color['play'].lstrip('#'), 16),
       description=f"**[{track.title}]({track.uri}) - {parseSec(track.duration)}**"
     )
     get_id = await channel.send(embed=embed)
-    self.now_playing_id = get_id.id
+    self.message_id[player.guild.id] = get_id.id
+    # setattr(player, 'message_id', get_id.id)
+    # player.message_id = get_id.id
 
   @commands.Cog.listener()
-  async def on_wavelink_track_end(self, player: CustomPlayer, track: wavelink.Track, reason):
-    channel = self.bot.get_channel(self.id)
-    msg = await channel.fetch_message(self.now_playing_id)
+  async def on_wavelink_track_end(self, player: wavelink.Player, track: wavelink.Track, reason):
+    channel = self.bot.get_channel(self.guild_id[player.guild.id])
+    msg = await channel.fetch_message(self.message_id[player.guild.id])
     await msg.delete()
     if not player.queue.is_empty:
       next_track = player.queue.get()
@@ -94,7 +95,7 @@ class Player(commands.Cog):
       self.id = interaction.channel_id
     except:
       return await interaction.response.send_message("❌ Cannot Join. \nPlease Join Voice channel first!!", ephemeral=True)
-
+    self.guild_id[interaction.guild_id] = interaction.channel_id
     if not vc:
       await channel.connect(cls=wavelink.Player)
       await interaction.response.send_message(f"Joined")
@@ -110,8 +111,9 @@ class Player(commands.Cog):
     else:
       vc: wavelink.Player = interaction.user.guild.voice_client
 
-    if self.id == 0:
-      self.id = interaction.channel_id
+
+    self.guild_id[interaction.guild_id] = interaction.channel_id
+
     search = ''
     embed = discord.Embed(
         color=int(self.Response_color['success'].lstrip('#'), 16),
@@ -222,8 +224,7 @@ class Player(commands.Cog):
     else:
       vc: wavelink.Player = interaction.user.guild.voice_client
     id = interaction.channel_id
-    if self.id == 0:
-      self.id = id
+    self.guild_id[interaction.guild_id] = interaction.channel_id
     embed = discord.Embed(
         color=int(self.Response_color['success'].lstrip('#'), 16),
         timestamp=datetime.datetime.now(pytz.timezone('Asia/Jakarta'))
@@ -418,7 +419,11 @@ class Player(commands.Cog):
     if not channel:
       await interaction.response.send_message("❌ Not joined a voice channel", ephemeral=True)
     await channel.disconnect()
-    self.id = 0
+
+    del self.guild_id[interaction.guild.id]
+    
+    del self.message_id[interaction.guild.id]
+    print(self.guild_id, self.message_id)
     await interaction.response.send_message("✅ Succesfully Disconnected ")
 
   @play.error
