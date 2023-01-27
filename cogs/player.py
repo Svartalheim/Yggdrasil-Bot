@@ -11,6 +11,7 @@ from wavelink.ext import spotify
 import spotify as spotifyClient
 from dotenv import load_dotenv
 from os import getenv
+import copy
 load_dotenv()
 
 MY_SPOTIFY_CLIENT = getenv('SPOTIFY_CLIENT')
@@ -38,7 +39,6 @@ class Player(commands.Cog):
     self.bot = bot
     self.guild_id = {}
     self.message_id = {}
-    self.now_playing_id = 0
     self.synced = False
     super().__init__()
 
@@ -71,6 +71,22 @@ class Player(commands.Cog):
     channel = self.bot.get_channel(self.guild_id[player.guild.id])
     msg = await channel.fetch_message(self.message_id[player.guild.id])
     await msg.delete()
+
+    try:
+      if player.loop is True:
+        player.queue.put_at_front(track)
+    except:
+      pass
+      # return await player.play(track
+    try:
+      if player.qloop is True and not player.loop:
+        await player.queue.put_wait(track)
+        # player.queue = player.queuelist
+        # # print(player.queue, 'why still empty bruh', player.queuelist)
+        # await player.play(player.tracklist)
+    except:
+      pass
+
     if not player.queue.is_empty:
       next_track = player.queue.get()
       await player.play(next_track)
@@ -111,7 +127,6 @@ class Player(commands.Cog):
     else:
       vc: wavelink.Player = interaction.user.guild.voice_client
 
-
     self.guild_id[interaction.guild_id] = interaction.channel_id
 
     search = ''
@@ -127,6 +142,7 @@ class Player(commands.Cog):
       if "playlist?" in query:
         playlist = await wavelink.YouTubePlaylist.search(query=query)
         for search in playlist.tracks:
+          # print(type(search))
           await vc.queue.put_wait(search)
         if not vc.is_playing():
           search = await vc.queue.get_wait()
@@ -161,7 +177,6 @@ class Player(commands.Cog):
           embed.description = f"✅ Queued - {length} tracks from ** [{info_playlist.name}]({info_playlist.url})**"
           return await interaction.followup.send(embed=embed)
       else:
-        # search = await vc.node.get_tracks(query=query, cls=wavelink.Track)
         search = await wavelink.NodePool.get_node().get_tracks(wavelink.YouTubeTrack, query)
         search = search[0]
     else:
@@ -169,16 +184,10 @@ class Player(commands.Cog):
 
     if vc.is_playing():
       await vc.queue.put_wait(item=search)
-      # if len(search.title) > 36:
-      #   embed.description = f"✅ Queued - **[{search.title[:40]}]({search.uri})...**"
-      # else:
       embed.description = f"✅ Queued - **[{search.title}]({search.uri})**"
       await interaction.followup.send(embed=embed)
     else:
       await vc.play(search)
-      # if len(vc.source.title) > 36:
-      #   embed.description = f"🎶 Playing - **[{vc.source.title[:40]}]({search.uri})...**"
-      # else:
       embed.description = f"🎶 Playing - **[{vc.source.title}]({search.uri})**"
       await interaction.followup.send(embed=embed)
 
@@ -243,20 +252,84 @@ class Player(commands.Cog):
       # print(search[0].info)
       if vc.is_playing():
         await vc.queue.put_wait(item=search)
-        # if len(search.title) > 36:
-        #   embed.description = f"✅ Queued - **[{search.info['title'][:40]}]({search.info['uri']})...**"
-        # else:
         embed.description = f"✅ Queued - **[{search.info['title']}]({search.info['uri']})**"
         await interaction.edit_original_response(embed=embed)
       else:
         await vc.play(search)
-        # if len(vc.source.title) > 36:
-        #   embed.description = f"🎶 Playing - **[{vc.source.title[:40]}]({vc.source.info['uri']})...**"
-        # else:
         embed.description = f"🎶 Playing - **[{vc.source.title}]({vc.source.info['uri']})**"
         await interaction.edit_original_response(embed=embed)
     except Exception as e:
       print(e)
+
+  @app_commands.command(name="insert", description='Play a single song from youtube/spotify')
+  @app_commands.describe(query="Link youtube / keyword")
+  async def insert(self, interaction: discord.Interaction, query: str):
+    await interaction.response.defer()
+    if not interaction.user.guild.voice_client:
+      vc: wavelink.Player = await interaction.user.voice.channel.connect(cls=wavelink.Player)
+    else:
+      vc: wavelink.Player = interaction.user.guild.voice_client
+
+    if not vc.is_playing() and vc.queue.is_empty:
+      return await interaction.followup.send(embed=discord.Embed(
+        color=int(self.Response_color['failed'].lstrip('#'), 16),
+        timestamp=datetime.datetime.now(pytz.timezone('Asia/Jakarta')),
+        description=f"❌ Can't insert, please use \u0060/play\u0060 because the bot isn't playing"
+      ).set_footer(
+        text=f'From {interaction.user} \u200b',
+        icon_url=interaction.user.display_avatar
+      ))
+
+    self.guild_id[interaction.guild_id] = interaction.channel_id
+
+    search = ''
+    embed = discord.Embed(
+        color=int(self.Response_color['success'].lstrip('#'), 16),
+        timestamp=datetime.datetime.now(pytz.timezone('Asia/Jakarta'))
+      ).set_footer(
+        text=f'From {interaction.user} \u200b',
+        icon_url=interaction.user.display_avatar
+      )
+
+    if query.startswith("https://"):
+      if "playlist?" in query:
+        embed.color = int(self.Response_color['failed'].lstrip('#'), 16)
+        embed.description = f"❌ Please use single track for insert"
+        return await interaction.followup.send(embed=embed)
+      #   playlist = await wavelink.YouTubePlaylist.search(query=query)
+      #   for search in playlist.tracks:
+      #     await vc.queue.put_wait(search)
+      #   if not vc.is_playing():
+      #     search = await vc.queue.get_wait()
+      #     await vc.play(search)
+      #   embed.description = f"✅ Queued - {len(playlist.tracks)} tracks from ** [{playlist.name}]({query})**"
+      #   return await interaction.followup.send(embed=embed)
+      if "open.spotify" in query:
+        decoded = spotify.decode_url(query)
+        # print(decoded['type'], decoded['id'])
+        if decoded and decoded['type'] is spotify.SpotifySearchType.track:
+          search = await spotify.SpotifyTrack.search(query=decoded["id"], type=decoded["type"], return_first=True)
+        elif decoded and decoded['type'] is spotify.SpotifySearchType.playlist or decoded['type'] is spotify.SpotifySearchType.album:
+          embed.color = int(self.Response_color['failed'].lstrip('#'), 16)
+          embed.description = f"❌ Please use single track for insert"
+          return await interaction.followup.send(embed=embed)
+      else:
+        search = await wavelink.NodePool.get_node().get_tracks(wavelink.YouTubeTrack, query)
+        search = search[0]
+    else:
+      search = await wavelink.YouTubeTrack.search(query=query, return_first=True)
+
+    try:
+      if vc.is_playing():
+        vc.queue.put_at_front(item=search)
+        embed.description = f"✅ Inserted - **[{search.title}]({search.uri})**"
+        await interaction.followup.send(embed=embed)
+      else:
+        embed.color = int(self.Response_color['failed'].lstrip('#'), 16)
+        embed.description = f"❌ Please use single track for insert"
+        return await interaction.followup.send(embed=embed)
+    except Exception as e:
+      print(e, 'what could be wrong lol')
 
   @app_commands.command(name="queue", description="Song queue")
   async def queue(self, interaction: discord.Interaction):
@@ -341,6 +414,87 @@ class Player(commands.Cog):
 
     await interaction.followup.send(embed=embed)
 
+  @app_commands.command(name="track-loop", description="Loop single track")
+  async def trackloop(self, interaction: discord.Interaction):
+    await interaction.response.defer()
+    embed = discord.Embed(
+        description="❌ Cannot loop. \nPlease make sure to have a music playing or joined a voice channel",
+        color=int(self.Response_color['failed'].lstrip('#'), 16)
+    )
+    try:
+      if interaction.user.guild.voice_client:
+        player: wavelink.Player = interaction.user.guild.voice_client
+        if not player.is_playing:
+          return interaction.followup.send(embed=embed)
+
+        try:
+          if player.loop:
+            player.loop = False
+          elif player.loop is False:
+            player.loop = True
+        except:
+          setattr(player, 'loop', True)
+          pass
+        print(player.loop)
+        if player.loop:
+          embed.description = "✅ Loop Track"
+          embed.color = int(self.Response_color['success'].lstrip('#'), 16)
+        else:
+          embed.description = "✅ Unloop Track"
+          embed.color = int(self.Response_color['success'].lstrip('#'), 16)
+    except Exception as e:
+      print('asd', e)
+
+    await interaction.followup.send(embed=embed)
+
+  @app_commands.command(name="queue-loop", description="Loop queue track")
+  async def queueloop(self, interaction: discord.Interaction):
+    await interaction.response.defer()
+    embed = discord.Embed(
+        description="❌ Cannot loop. \nPlease make sure to have a queue list or joined a voice channel",
+        color=int(self.Response_color['failed'].lstrip('#'), 16)
+    )
+    try:
+      if interaction.user.guild.voice_client:
+        player: wavelink.Player = interaction.user.guild.voice_client
+        if player.queue.is_empty and not player.is_playing:
+          return interaction.followup.send(embed=embed)
+
+        try:
+          if player.qloop:
+            player.qloop = False
+          elif player.qloop is False:
+            player.qloop = True
+        except Exception as e:
+          setattr(player, 'qloop', True)
+          pass
+
+        if player.qloop:
+          # setattr(player, 'queuelist', player.queue)
+          # setattr(player, 'tracklist', player.track)
+          # player.queuelist: wavelink.WaitQueue = []
+          # for ele in enumerate(player.queue):
+          #   player.queuelist.
+          # # player.queuelist = copy.deepcopy(player.queue.copy)
+          # # print(player.queuelist.__self__, 'queuelist')
+          # temp = []
+          # for count, ele in enumerate(player.queue):
+          #   temp += ele
+          #   print(type(ele))
+          # # print(type(temp.__self__), temp.__self__)
+          # # queuedeep = copy.deepcopy(temp.__self__)
+          # print(temp)
+          # player.queuelist = temp
+          embed.description = f"✅ Loop Queue - **{len(player.queue)+1} Tracks**"
+          embed.color = int(self.Response_color['success'].lstrip('#'), 16)
+        else:
+          embed.description = "✅ Unloop Queue"
+          embed.color = int(self.Response_color['success'].lstrip('#'), 16)
+    except Exception as e:
+      print('asd', e)
+
+    await interaction.followup.send(embed=embed)
+
   @app_commands.command(name="shuffle", description="Shuffle song")
   async def shuffle(self, interaction: discord.Interaction):
     await interaction.response.defer()
@@ -361,23 +515,29 @@ class Player(commands.Cog):
   @app_commands.command(name="np", description="Now playing song")
   async def np(self, interaction: discord.Interaction):
     await interaction.response.defer()
-    vc: wavelink.Player = interaction.user.guild.voice_client
-
-    # print(vc.source.info)
-    # print(vc.track.info)
-    embed = discord.Embed(
-      title="Now Playing",
-      description=f"**[{vc.source.title}]({vc.source.info['uri']}) - {parseSec(vc.source.duration)}**",
-      color=int(self.Response_color['play'].lstrip('#'), 16)
-    )
-    vc: wavelink.Player = interaction.user.guild.voice_client
-    if interaction.user.guild.voice_client:
-      if vc.is_playing:
-        await interaction.followup.send(embed=embed)
+    try:
+      if interaction.user.guild.voice_client:
+        vc: wavelink.Player = interaction.user.guild.voice_client
+        if vc.is_playing():
+          # print('wtf why playing lul')
+          pos = vc.position
+          duration = vc.source.duration
+          time = duration - pos
+          # print(vc.source.info)
+          # print(vc.track.info)
+          embed = discord.Embed(
+            title="Now Playing",
+            description=f"""**[{vc.source.title}]({vc.source.info['uri']}) - {parseSec(vc.source.duration)}** 
+            \n** {str(datetime.timedelta(seconds=time)).split('.')[0]} left**""",
+            color=int(self.Response_color['play'].lstrip('#'), 16)
+          )
+          await interaction.followup.send(embed=embed)
+        else:
+          return await interaction.followup.send("Nothing is playing")
       else:
-        return await interaction.followup.send("Nothing is playing")
-    else:
-      await interaction.followup.send("The bot is not connected to a voice channel", ephemeral=True)
+        await interaction.followup.send("The bot is not connected to a voice channel", ephemeral=True)
+    except Exception as e:
+      print(e, 'np err')
 
   @app_commands.command(name="pause", description="Pause song")
   async def pause(self, interaction: discord.Interaction):
@@ -418,12 +578,15 @@ class Player(commands.Cog):
     channel = interaction.user.guild.voice_client
     if not channel:
       await interaction.response.send_message("❌ Not joined a voice channel", ephemeral=True)
+
     await channel.disconnect()
 
-    del self.guild_id[interaction.guild.id]
-    
-    del self.message_id[interaction.guild.id]
-    print(self.guild_id, self.message_id)
+    try:
+      del self.guild_id[interaction.guild.id]
+      del self.message_id[interaction.guild.id]
+    except:
+      pass
+
     await interaction.response.send_message("✅ Succesfully Disconnected ")
 
   @play.error
