@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  lavalink:
+    container_name: lavalink
+    image: fredboat/lavalink:master
+    volumes:
+      - ./Lavalink/application.yml:/opt/Lavalink/application.yml
+    ports:
+      - '2333:2333'
+    restart: always
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: on-failure
+    depends_on:
+      - lavalink
+    links:
+      - 'lavalink:localhost'
+    env_file:
+      - .env
+  

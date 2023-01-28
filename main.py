@@ -28,7 +28,7 @@ async def connect_nodes():
   await bot.wait_until_ready()
   await wavelink.NodePool.create_node(
     bot=bot,
-    host='127.0.0.1',
+    host='lavalink',
     port=2333,
     password='youshallnotpass',
     spotify_client=spotify.SpotifyClient(client_id=getenv('SPOTIFY_CLIENT'), client_secret=getenv('SPOTIFY_SECRET'))
