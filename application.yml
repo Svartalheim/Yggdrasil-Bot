@@ -1,6 +1,6 @@
 server: # REST and WS server
   port: 2333
-  address: 127.0.0.1
+  address: 0.0.0.0
 lavalink:
   server:
     password: "youshallnotpass"
@@ -8,8 +8,8 @@ lavalink:
       youtube: true
       bandcamp: true
       soundcloud: true
-      twitch: true
-      vimeo: true
+      twitch: false
+      vimeo: false
       http: true
       local: false
     bufferDurationMs: 400 # The duration of the NAS buffer. Higher values fare better against longer GC pauses. Minimum of 40ms, lower values may introduce pauses.

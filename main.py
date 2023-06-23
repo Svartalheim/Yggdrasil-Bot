@@ -1,80 +1,77 @@
 
 from os import getenv, listdir
 from dotenv import load_dotenv
-import discord
-from discord import app_commands
+from discord import Interaction
 from discord.ext import commands
+from discord import Embed
+from discord import Intents
+from discord import Status
 import asyncio
 import wavelink
 from wavelink.ext import spotify
 load_dotenv()
 MY_ENV_VAR = getenv('TOKEN')
-
-intents = discord.Intents.all()
-intents.members = True
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+MY_SPOTIFY_CLIENT = getenv('SPOTIFY_CLIENT')
+MY_SPOTIFY_SECRET = getenv('SPOTIFY_SECRET')
 
 
+class Bot(commands.Bot):
+  def __init__(self) -> None:
+    intents = Intents.all()
+    super().__init__(intents=intents, command_prefix='!')
+
+  async def on_ready(self) -> None:
+    print(f'Logged in {self.user} | {self.user.id}')
+    
+
+  async def setup_hook(self) -> None:
+    sc = spotify.SpotifyClient(
+      client_id=MY_SPOTIFY_CLIENT,
+      client_secret=MY_SPOTIFY_SECRET
+    )
+    node: wavelink.Node = wavelink.Node(
+      uri='http://localhost:2333', password='youshallnotpass')
+    await wavelink.NodePool.connect(client=self, nodes=[node], spotify=sc)
+    print('successfully connected into', node.id)
 
 
-# #connecting to wavelinkz
-@bot.event
-async def on_ready():
-  bot.loop.create_task(connect_nodes())
-  await bot.tree.sync()
+bot = Bot()
 
-async def connect_nodes():
-  await bot.wait_until_ready()
-  await wavelink.NodePool.create_node(
-    bot=bot,
-    host='lavalink',
-    port=2333,
-    password='youshallnotpass',
-    spotify_client=spotify.SpotifyClient(client_id=getenv('SPOTIFY_CLIENT'), client_secret=getenv('SPOTIFY_SECRET'))
-  )
 
-@bot.event
-async def on_wavelink_node_ready(node: wavelink.Node):
-  print(f'Node: <<{node.identifier}>> is ready!')  
-
-# @bot.event
-# async def on_wavelink_track_start(player: CustomPlayer, track: wavelink.Track):
-  
-@bot.tree.command(name="help", description="It might the first thing you wanna see")
-async def help(interaction:discord.Interaction):
-  e = discord.Embed(
-      title="Help Commands",
-      description="Teheee~ \n\n\n**Anyway here the command list**",
-      color=int('E49B0F'.lstrip('#'), 16)
-  ).set_thumbnail(url="https://i.imgur.com/BAHPJMS.png"
-                  ).add_field(
-      name="`/musichelp`",
-      inline=False,
-      value='This bot feature currently only supporting music player for Youtube/Spotify. \n So, if you want to go check the available command just type that'
-  ).add_field(
-      name="Slash Command",
-      inline=False,
-      value='Just try type `/` on your keyboard, and try find me...'
+def embedMain(created_at):
+  e = Embed(
+    title="Help Commands",
+    description="Teheee~ \n\n\n**Anyway here the command list**",
+    color=int('E49B0F'.lstrip('#'), 16)
+  ).set_thumbnail(
+    url="https://i.imgur.com/BAHPJMS.png"
   ).set_author(
       name=bot.user.name,
       icon_url=bot.user.avatar.url
-  ).set_footer(text=f"© {bot.user.name} | {interaction.created_at.strftime('%x')}")
-  return await interaction.response.send_message(embed=e)
+  ).set_footer(
+    text=f"© {bot.user.name} | {created_at.strftime('%x')}"
+  )
+  return e
+
+
+@bot.tree.command(name="help", description="It might the first thing you wanna see")
+async def help(interaction: Interaction):
+  embed = embedMain(interaction.created_at)
+  embed.add_field(
+      name="Slash Command",
+      inline=False,
+      value='Just try type `/` on your keyboard, and try find me...'
+  )
+  try:
+    return await interaction.response.send_message(embed=embed)
+  except Exception as e:
+    print(e)
 
 
 @bot.tree.command(name="music-help", description="All music commands goes here")
-async def musichelp(interaction: discord.Interaction):
-  e = discord.Embed(
-      title="Music Commands",
-      description="Teheee~ \n\n\n**Anyway here the command list**",
-      color=int('E49B0F'.lstrip('#'), 16)
-  ).set_thumbnail(url="https://i.imgur.com/BAHPJMS.png"
-                  ).add_field(
-      name="`/join`",
-      value='To join an voice channel',
-      inline=False
-  ).add_field(
+async def musichelp(interaction: Interaction):
+  embed = embedMain(interaction.created_at)
+  embed.add_field(
       name="`/play`",
       inline=False,
       value='Play anything from youtube/spotify'
@@ -86,7 +83,7 @@ async def musichelp(interaction: discord.Interaction):
       name="`/queue`",
       inline=False,
       value='List of songs that will played'
-  ).add_field(
+  ).add_field(  
       name="`/skip`",
       value='Skip song'
   ).add_field(
@@ -99,11 +96,8 @@ async def musichelp(interaction: discord.Interaction):
       name="`/np`",
       inline=False,
       value='Now playing song'
-  ).set_author(
-      name=bot.user.name,
-      icon_url=bot.user.avatar.url
-  ).set_footer(text=f"© {bot.user.name} | {interaction.created_at.strftime('%x')}")
-  return await interaction.response.send_message(embed=e)
+  )
+  return await interaction.response.send_message(embed=embed)
 
 
 async def load():
