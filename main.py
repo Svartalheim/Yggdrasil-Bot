@@ -12,7 +12,7 @@ from wavelink.ext import spotify
 load_dotenv()
 MY_ENV_VAR = getenv('TOKEN')
 MY_SPOTIFY_CLIENT = getenv('SPOTIFY_CLIENT')
-MY_SPOTIFY_SECRET = getenv('SPOTIFY_SECRET')
+MY_SPOTIFY_SECRET = getenv('SPOTIFY5_SECRET')
 
 
 class Bot(commands.Bot):
