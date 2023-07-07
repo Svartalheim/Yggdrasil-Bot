@@ -120,13 +120,13 @@ async def wavelinkSearcher(query, embed, vc, interaction, type=''):
           search = await wavelink.NodePool.get_node().get_tracks(wavelink.YouTubeTrack, query)
           search = search[0]
       else:
-        search = await wavelink.YouTubeTrack.search(query, return_first=True)
+        search = await wavelink.YouTubeTrack.search(query)
+        search = search[0]
       if search == '' or search == []:
         return await interaction.followup.send(f"❌ Cannot Play. \nCould not found the track.", ephemeral=True)
   except IndexError:
     print(search, 'error index')
     return await interaction.followup.send(f"❌ Cannot Play. \nCould not found the track.", ephemeral=True)
-
   return search
 
 
@@ -546,15 +546,15 @@ class Player(commands.Cog):
     else:
       await interaction.followup.send("The bot is not connected to a voice channel")
 
-  # @play.error
-  # async def play_error(self, interaction: Interaction, error):
-  #   if isinstance(error, commands.BadArgument):
-  #     await interaction.followup.send(f"❌ Cannot Play. \nCould not found the track.  \n{error}", ephemeral=True)
-  #   elif isinstance(error, AttributeError):
-  #     await interaction.followup.send(f"❌ Cannot Play. \nPlease Join Voice channel first!!  \n{error}", ephemeral=True)
-  #   else:
-  #     print(error)
-  #     await interaction.followup.send(f"❌ Cannot Play. \nPlease Join Voice channel first!!", ephemeral=True)
+  @play.error
+  async def play_error(self, interaction: Interaction, error):
+    if isinstance(error, commands.BadArgument):
+      await interaction.followup.send(f"❌ Cannot Play. \nCould not found the track.  \n{error}", ephemeral=True)
+    elif isinstance(error, AttributeError):
+      await interaction.followup.send(f"❌ Cannot Play. \nPlease Join Voice channel first!!  \n{error}", ephemeral=True)
+    else:
+      print(error)
+      await interaction.followup.send(f"❌ Cannot Play. \nPlease Join Voice channel first!!", ephemeral=True)
 
   @join.error
   async def join_error(self, interaction: Interaction, error):
@@ -562,12 +562,12 @@ class Player(commands.Cog):
       return interaction.followup.send(f"❌ Cannot Play. \nPlease Join Voice channel first \n{error}", ephemeral=True)
     await interaction.followup.send(f"❌ Cannot Play. \nPlease Join Voice channel first!!", ephemeral=True)
 
-  # async def cog_app_command_error(self, interaction: Interaction, error: app_commands.AppCommandError) -> None:
-  #   if isinstance(error, commands.MissingPermissions):
-  #     await _handling_error(interaction=interaction, resp='❌ Missing Permission')
-  #   else:
-  #     await _handling_error(interaction=interaction, resp=f'❌ Uknown error, {Exception(error)}')
-  #   return await super().cog_app_command_error(interaction, error)
+  async def cog_app_command_error(self, interaction: Interaction, error: app_commands.AppCommandError) -> None:
+    if isinstance(error, commands.MissingPermissions):
+      await _handling_error(interaction=interaction, resp='❌ Missing Permission')
+    else:
+      await _handling_error(interaction=interaction, resp=f'❌ Uknown error, {Exception(error)}')
+    return await super().cog_app_command_error(interaction, error)
 
 
 async def _handling_error(interaction: Interaction, resp: str) -> None:
