@@ -1,6 +1,6 @@
 
 from os import getenv, listdir
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 from discord import Interaction
 from discord.ext import commands
 from discord import Embed
@@ -9,7 +9,7 @@ from discord import Status
 import asyncio
 import wavelink
 from wavelink.ext import spotify
-load_dotenv()
+# load_dotenv()
 MY_ENV_VAR = getenv('TOKEN')
 MY_SPOTIFY_CLIENT = getenv('SPOTIFY_CLIENT')
 MY_SPOTIFY_SECRET = getenv('SPOTIFY_SECRET')

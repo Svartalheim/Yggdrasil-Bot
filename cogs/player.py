@@ -11,9 +11,9 @@ import random
 from asyncio import TimeoutError
 from wavelink.ext import spotify
 import spotify as spotifyClient
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 from os import getenv
-load_dotenv()
+# load_dotenv()
 
 MY_SPOTIFY_CLIENT = getenv('SPOTIFY_CLIENT')
 MY_SPOTIFY_SECRET = getenv('SPOTIFY_SECRET')
