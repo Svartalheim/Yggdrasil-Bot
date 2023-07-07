@@ -1,6 +1,6 @@
 
 from os import getenv, listdir
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 from discord import Interaction
 from discord.ext import commands
 from discord import Embed
@@ -9,10 +9,10 @@ from discord import Status
 import asyncio
 import wavelink
 from wavelink.ext import spotify
-# load_dotenv()
+load_dotenv()
 MY_ENV_VAR = getenv('TOKEN')
 MY_SPOTIFY_CLIENT = getenv('SPOTIFY_CLIENT')
-MY_SPOTIFY_SECRET = getenv('SPOTIFY5_SECRET')
+MY_SPOTIFY_SECRET = getenv('SPOTIFY_SECRET')
 
 
 class Bot(commands.Bot):
@@ -25,12 +25,12 @@ class Bot(commands.Bot):
     
 
   async def setup_hook(self) -> None:
-    sc = spotify.SpotifyClient(
+    sc: spotify.SpotifyClient = spotify.SpotifyClient(
       client_id=MY_SPOTIFY_CLIENT,
       client_secret=MY_SPOTIFY_SECRET
     )
     node: wavelink.Node = wavelink.Node(
-      uri='http://localhost:2333', password='youshallnotpass')
+      uri='http://lavalink:2333', password='youshallnotpass')
     await wavelink.NodePool.connect(client=self, nodes=[node], spotify=sc)
     print('successfully connected into', node.id)
 
