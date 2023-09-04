@@ -1,4 +1,3 @@
-from os import path
 from typing import Union
 from logging import Logger, getLogger, INFO, StreamHandler
 from discord import (

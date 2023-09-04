@@ -1,22 +1,12 @@
 from discord import (
     Intents,
-    Message,
     Embed,
-    TextChannel,
-    Role,
-    Guild,
     Interaction,
-    VoiceChannel,
-    Member,
-    errors,
-    Member,
-    File,
     Activity,
     ActivityType,
 )
 from discord.app_commands import guild_only
 from discord.ext import commands, tasks
-from asyncio import sleep, wait, create_task
 from wavelink import Node, NodePool
 from config import YggConfig
 from wavelink.ext.spotify import SpotifyClient
@@ -85,7 +75,6 @@ class YggTask:
             )
             
         async def e() -> None:
-            # watching_list=["Ragnarok", "Dramaturgy"]
             await self.change_presence(
                 status=Status.idle,
                 activity=Activity(
@@ -121,7 +110,6 @@ class YggClient(YggBase, YggTask):
     def __init__(self) -> None:
         intents: Intents = Intents.default()
         intents.members = True
-        intents.message_content = True
 
         super().__init__(YggConfig.BOT_PREFIX, intents=intents)
 
@@ -145,7 +133,7 @@ class YggClient(YggBase, YggTask):
             await self.tree.sync()
             self.synced = True
 
-        await wait([create_task(self._begin_loop_task())])
+        await self._begin_loop_task()
 
 
 bot: commands.Bot = YggClient()

@@ -1,11 +1,12 @@
 from datetime import timedelta
-from asyncio import gather
+from asyncio import wait, create_task
 from typing import Union, Tuple
 from itertools import chain
 from random import choice
 from enum import Enum
 
 from discord import (
+    Member,
     Interaction,
     VoiceClient,
     Embed,
@@ -40,12 +41,9 @@ from wavelink.tracks import (
 )
 from wavelink.node import Node, NodePool
 from wavelink.ext.spotify import (
-    decode_url,
     SpotifyTrack,
-    SpotifySearchType,
     SpotifyClient,
     SpotifyRequestError,
-    SpotifyDecodePayload,
     BASEURL,
 )
 
@@ -54,6 +52,7 @@ from config import YggConfig
 
 
 class TrackView(View):
+
     def __init__(self, control, /, player: Player, *, timeout: float | None = None):
         self._track_control: MusicPlayer = control
         self._player: Player = player
@@ -64,53 +63,70 @@ class TrackView(View):
 
     @property
     def _is_previous_disabled(self) -> bool:
-        if self._player.queue.history.is_empty or self._player.queue.history.count <= 1:
+        if self._player.queue.history.is_empty:
             return True
 
-        if not self._player.queue.history:
+        if self._player.queue.history[self._player.queue.history.count - 1] is self._player.current and self._player.queue.history.count <= 1:
             return True
 
         return False
 
-    async def create_embed(self, interaction: Interaction) -> Embed:
-        player: Player = interaction.guild.voice_client
-        track_type: TrackType = TrackType.what_type(player.current.uri)
+    async def create_embed(self) -> Embed:
+        interaction: Interaction = self._track_control._guild_message[
+            self._player.guild.id]['interaction']
         self._update_button()
 
-        if isinstance(player.current, YouTubeMusicTrack):
-            player.current.uri = player.current.uri.replace("www", "music")
+        if self._player.current.PREFIX == YouTubeMusicTrack.PREFIX:
+            self._player.current.uri = self._player.current.uri.replace(
+                "www", "music")
+
+        track_type: TrackType = TrackType.what_type(self._player.current.uri)
 
         embed = Embed(
             title="🎶 Now Playing",
-            color=YggUtil.convert_color(YggConfig.COLOR["general"]),
-            description=f"**[{player.current.title}]({player.current.uri}) - {self._track_control._parseSec(player.current.duration)}**",
-            timestamp=YggUtil.get_time(),
+            color=YggUtil.convert_color(YggConfig.COLOR['play']),
+            description=f"**[{self._player.current.title}]({self._player.current.uri}) - {self._track_control._parseSec(self._player.current.duration)}**",
+            timestamp=interaction.created_at
         )
 
-        if isinstance(player.current, YouTubeTrack):
-            image: str = await player.current.fetch_thumbnail()
+        if isinstance(self._player.current, YouTubeTrack):
+            image: str = await self._player.current.fetch_thumbnail()
             embed.set_image(url=image)
 
-        embed.set_author(
-            name=str(track_type.name).replace("_", " ").title(),
-            icon_url=track_type.favicon(),
-        )
+        embed.set_author(name=str(track_type.name).replace(
+            "_", " ").title(), icon_url=track_type.favicon())
         embed.set_footer(
-            text=f"Last control from {interaction.user.name}",
-            icon_url=interaction.user.display_avatar,
-        )
+            text=f'Last control from {interaction.user.name}', icon_url=interaction.user.display_avatar)
 
         return embed
 
     async def _update_message(self, interaction: Interaction) -> None:
         self._update_button()
+
         try:
-            embed: Embed = await self.create_embed(interaction)
-            await interaction.edit_original_response(
-                view=self, embed=embed
-            )
-        except NotFound:
+            embed: Embed = await self.create_embed()
+            await interaction.edit_original_response(view=self, embed=embed)
+        except (NotFound, AttributeError):
             pass
+
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        isTrue = True
+        # Check whether user is joined
+        if not interaction.user.voice:
+            await YggUtil.send_response(interaction, message="Can't do that. \nPlease Join Voice channel first!!", emoji="❌", ephemeral=True)
+            isTrue = False
+        # Check wheter user is allowed
+        elif interaction.guild.voice_client and interaction.guild.voice_client.channel != interaction.user.voice.channel:
+            await YggUtil.send_response(interaction, message="Can't do that. \nPlease join the same Voice Channel with bot!!", emoji="🛑", ephemeral=True)
+            isTrue = False
+
+        if isTrue:
+            self._track_control._record_timestamp(
+                guild_id=interaction.guild_id,
+                interaction=interaction
+            )
+
+        return isTrue
 
     def _update_button(self) -> None:
         self._previous.disabled = self._is_previous_disabled or self._is_loop
@@ -118,22 +134,19 @@ class TrackView(View):
 
         self._pause.label = "Resume" if not self._is_playing else "Pause"
         self._pause.emoji = "▶️" if not self._is_playing else "⏸️"
-        self._pause.style = (
-            ButtonStyle.green if not self._is_playing else ButtonStyle.blurple
-        )
+        self._pause.style = ButtonStyle.green if not self._is_playing else ButtonStyle.blurple
 
         self._loop.label = "Loop" if not self._is_loop else "Unloop"
         self._loop.style = ButtonStyle.green if not self._is_loop else ButtonStyle.red
 
     @button(label="Previous", emoji="⏮️", style=ButtonStyle.secondary)
     async def _previous(self, interaction: Interaction, _) -> None:
-        await interaction.response.defer()
-        await self._update_message(interaction)
-        await self._track_control.previous(interaction)
+        await wait([
+            create_task(interaction.response.defer()),
+            create_task(self._track_control.previous(interaction))
+        ])
 
-    @button(
-        label="Pause", emoji="⏸️", style=ButtonStyle.blurple, custom_id="play_button"
-    )
+    @button(label="Pause", emoji="⏸️", style=ButtonStyle.blurple)
     async def _pause(self, interaction: Interaction, _) -> None:
         await interaction.response.defer()
 
@@ -145,11 +158,19 @@ class TrackView(View):
 
         await self._update_message(interaction)
 
+    @button(label="Stop", emoji="⏹️", style=ButtonStyle.red)
+    async def _stop(self, interaction: Interaction, _) -> None:
+        await wait([
+            create_task(interaction.response.defer()),
+            create_task(self._track_control.stop(interaction))
+        ])
+
     @button(label="Next", emoji="⏭️", style=ButtonStyle.secondary)
     async def _next(self, interaction: Interaction, _) -> None:
-        await interaction.response.defer()
-        await self._track_control.skip(interaction)
-        await self._update_message(interaction)
+        await wait([
+            create_task(interaction.response.defer()),
+            create_task(self._track_control.skip(interaction))
+        ])
 
     @button(label="Loop", emoji="🔁", style=ButtonStyle.green)
     async def _loop(self, interaction: Interaction, _) -> None:
@@ -161,19 +182,17 @@ class TrackView(View):
 
 
 class SelectView(View):
-    def __init__(
-        self,
-        control,
-        /,
-        data: list[Union[Playable, SpotifyTrack]],
-        is_jump_command: bool = False,
-        *,
-        timeout: float | None = 180,
-    ):
-        self._data: list[Union[Playable, SpotifyTrack]] = list(data)
+
+    SHOW_LIMIT = 25
+
+    def __init__(self, control, author: Member, /, data: list[Union[Playable, SpotifyTrack]], is_jump_command: bool = False, autoplay: bool = None, *, timeout: float | None = 180):
+        self._data: list[Union[Playable, SpotifyTrack]] = list(data)[
+            0:self.SHOW_LIMIT]
         self._track_control: MusicPlayer = control
+        self._author: Member = author
         self._selected: Union[Playable, SpotifyTrack] = None
         self._is_jump_command: bool = is_jump_command
+        self._autoplay: bool = autoplay
         self.rand_emoji: list(str) = ["🎼", "🎵", "🎶", "🎸", "🎷", "🎺", "🎹"]
 
         super().__init__(timeout=timeout)
@@ -181,47 +200,45 @@ class SelectView(View):
     @property
     def get_embed(self) -> Embed:
         self._pass_data_to_option()
-        embed: Embed = Embed(
-            title="🔍 Here's the result"
-            if not self._is_jump_command
-            else "⏭️ Jump to which track?",
-            description="To play the track, open the dropdown menu and select the desired track",
-            color=YggUtil.convert_color(YggConfig.COLOR["queue"]),
-        )
+        embed: Embed = Embed(title="🔍 Here's the result" if not self._is_jump_command else "⏭️ Jump to which track?",
+                             description="To play/queue the track, open the dropdown menu and select the desired track. Your track will be played/queued after this",
+                             color=YggUtil.convert_color(YggConfig.COLOR['queue']))
+
         return embed
 
-    def _pass_data_to_option(self) -> list[SelectOption]:
+    def _pass_data_to_option(self) -> None:
         if not self._data:
             raise IndexError
 
         for index, track in enumerate(self._data):
-            self._selector.options.append(
-                SelectOption(
-                    label=track.title,
-                    description=f"{track.author} - {MusicPlayerBase._parseSec(track.duration)}",
-                    emoji=choice(self.rand_emoji),
-                    value=str(index),
-                )
-            )
+            self._selector.options.append(SelectOption(
+                label=track.title, description=f"{track.author if not isinstance(track, SpotifyTrack) else ', '.join(track.artists)}\
+                      - {MusicPlayerBase._parseSec(track.duration)}", emoji=choice(self.rand_emoji), value=str(index)))
+
+    async def interaction_check(self, interaction: Interaction) -> bool:
+        isTrue: bool = True
+        if interaction.user.id != self._author.id:
+            await YggUtil.send_response(interaction, message="Couldn't do that. \nThis is not your request!!", emoji="🛑", ephemeral=True)
+            isTrue = False
+
+        return isTrue
 
     @select(placeholder="🎶 Select your search result!")
     async def _selector(self, interaction: Interaction, select: Select) -> None:
         await interaction.response.defer()
+        player: Player = interaction.guild.voice_client
 
         self._selected = self._data[int(select.values[0])]
-        select.disabled = True
-        select.placeholder = f"{select.options[int(select.values[0])].emoji} {select.options[int(select.values[0])].label}"
-        self._cancel_button.disabled = True
-        await interaction.edit_original_response(view=self)
+        embed: Embed = await self._track_control._play_response(
+            self._author, track=self._selected, is_queued=True if player and player.is_playing() else False, is_put_front=True if self._is_jump_command else False, is_autoplay=self._autoplay)
 
         if not self._is_jump_command:
-            _, _, _, _ = await self._track_control.play(
-                interaction, query=self._selected
-            )
+            _, _, _ = await self._track_control.play(interaction, query=self._selected, autoplay=self._autoplay)
         else:
             await self._track_control.skip(
-                interaction, index=self._data.index(self._selected)
-            )
+                interaction, index=self._data.index(self._selected))
+
+        await interaction.edit_original_response(view=None, embed=embed)
 
     @button(label="Cancel", emoji="✖️", style=ButtonStyle.red)
     async def _cancel_button(self, interaction: Interaction, _) -> None:
@@ -230,31 +247,14 @@ class SelectView(View):
 
 
 class QueueView(View):
-    def __init__(
-        self,
-        queue: Union[chain, BaseQueue],
-        is_history: bool = False,
-        *,
-        timeout: float | None = 180,
-    ):
+
+    def __init__(self, queue: Union[chain, BaseQueue], is_history: bool = False, *, timeout: float | None = 180):
         self._data: list[Union[Playable, SpotifyTrack]] = list(queue)
         self._current_page: int = 1
         self._limit_show: int = 10
         self._is_history: bool = is_history
 
         super().__init__(timeout=timeout)
-
-    @property
-    def _is_first_page_disabled(self) -> bool:
-        if self._current_page == 1:
-            return True
-        return False
-
-    @property
-    def _is_last_page_disabled(self) -> bool:
-        if self._current_page == int(len(self._data) / self._limit_show) + 1:
-            return True
-        return False
 
     @property
     def get_embed(self) -> Embed:
@@ -267,13 +267,9 @@ class QueueView(View):
 
         embed: Embed = Embed(
             title=f"📃 Queue {'history' if self._is_history else ''} - Page {self._current_page} of {int(len(self._data) / self._limit_show) + 1}",
-            color=YggUtil.convert_color(YggConfig.COLOR["queue"]),
-        )
-        count: int = (
-            (self._current_page - 1) * self._limit_show
-            if self._current_page != 1
-            else 0
-        )
+            color=YggUtil.convert_color(YggConfig.COLOR['queue']))
+        count: int = (self._current_page-1) * \
+            self._limit_show if self._current_page != 1 else 0
         embed.description = str()
 
         for track in data:
@@ -287,11 +283,7 @@ class QueueView(View):
         start_index = 0
         end_index = self._limit_show
 
-        if (
-            1
-            <= self._current_page
-            <= (len(self._data) + self._limit_show - 1) // self._limit_show
-        ):
+        if 1 <= self._current_page <= (len(self._data) + self._limit_show - 1) // self._limit_show:
             start_index = (self._current_page - 1) * self._limit_show
             end_index = start_index + self._limit_show
 
@@ -299,13 +291,13 @@ class QueueView(View):
 
     def _update_buttons(self):
         if self._current_page == 1:
-            self._first_page_button.disabled = True
             self._prev_button.disabled = True
+            self._first_page_button.disabled = True
         else:
-            self._first_page_button.disabled = False
             self._prev_button.disabled = False
+            self._first_page_button.disabled = False
 
-        if self._current_page == int(len(self._data) / self._limit_show) + 1:
+        if self._current_page == (len(self._data) + self._limit_show - 1) // self._limit_show:
             self._next_button.disabled = True
             self._last_page_button.disabled = True
         else:
@@ -320,7 +312,6 @@ class QueueView(View):
     async def _first_page_button(self, interaction: Interaction, _) -> None:
         await interaction.response.defer()
         self._current_page = 1
-
         await self._update_message(interaction)
 
     @button(label="<", style=ButtonStyle.blurple)
@@ -339,8 +330,7 @@ class QueueView(View):
     async def _last_page_button(self, interaction: Interaction, _) -> None:
         await interaction.response.defer()
         self._current_page = (
-            len(self._data) + self._limit_show - 1
-        ) // self._limit_show
+            len(self._data) + self._limit_show - 1) // self._limit_show
         await self._update_message(interaction)
 
 
@@ -356,16 +346,16 @@ class TrackType(Enum):
     @classmethod
     def what_type(cls, uri: str):
         if uri.startswith("http"):
-            if "spotify.com" in uri:
+            if 'spotify.com' in uri:
                 return cls.SPOTIFY
 
-            if "music.youtube.com" in uri:
+            if 'music.youtube.com' in uri:
                 return cls.YOUTUBE_MUSIC
 
-            if "youtube.com" in uri:
+            if 'youtube.com' in uri:
                 return cls.YOUTUBE
 
-            if "soundcloud.com" in uri:
+            if 'soundcloud.com' in uri:
                 return cls.SOUNCLOUD
 
     def favicon(self) -> str:
@@ -397,24 +387,10 @@ class MusicPlayerBase:
         async def decorator(interaction: Interaction) -> bool:
             isTrue: bool = True
             if not interaction.user.voice:
-                await YggUtil.send_response(
-                    interaction,
-                    message="Can't do that. \nPlease Join Voice channel first!!",
-                    emoji="❌",
-                    ephemeral=True,
-                )
+                await YggUtil.send_response(interaction, message="Can't do that. \nPlease Join Voice channel first!!", emoji="❌", ephemeral=True)
                 isTrue = False
-            elif (
-                interaction.guild.voice_client
-                and interaction.guild.voice_client.channel
-                != interaction.user.voice.channel
-            ):
-                await YggUtil.send_response(
-                    interaction,
-                    message="Cannot Join. \nThe bot is already connected to a voice channel!!",
-                    emoji="❌",
-                    ephemeral=True,
-                )
+            elif interaction.guild.voice_client and interaction.guild.voice_client.channel != interaction.user.voice.channel:
+                await YggUtil.send_response(interaction, message="Cannot Join. \nThe bot is already connected to a voice channel!!", emoji="❌", ephemeral=True)
                 isTrue = False
 
             return isTrue
@@ -425,17 +401,11 @@ class MusicPlayerBase:
     def _is_user_allowed(cls):
         async def decorator(interaction: Interaction) -> bool:
             isTrue: bool = True
-            if (
-                interaction.guild.voice_client
-                and interaction.guild.voice_client.channel
-                != interaction.user.voice.channel
-            ):
-                await YggUtil.send_response(
-                    interaction,
-                    message="Can't do that. \nPlease join the same Voice Channel with bot!!",
-                    emoji="🛑",
-                    ephemeral=True,
-                )
+            if not interaction.user.voice:
+                await YggUtil.send_response(interaction, message="Can't do that. \nPlease Join Voice channel first!!", emoji="❌", ephemeral=True)
+                isTrue = False
+            elif interaction.guild.voice_client and interaction.guild.voice_client.channel != interaction.user.voice.channel:
+                await YggUtil.send_response(interaction, message="Can't do that. \nPlease join the same Voice Channel with bot!!", emoji="🛑", ephemeral=True)
                 isTrue = False
 
             return isTrue
@@ -447,12 +417,7 @@ class MusicPlayerBase:
         async def decorator(interaction: Interaction) -> bool:
             isTrue: bool = True
             if not interaction.guild.voice_client:
-                await YggUtil.send_response(
-                    interaction,
-                    message="Not joined a voice channel",
-                    emoji="🛑",
-                    ephemeral=True,
-                )
+                await YggUtil.send_response(interaction, message="Not joined a voice channel", emoji="🛑", ephemeral=True)
                 isTrue = False
 
             return isTrue
@@ -464,12 +429,8 @@ class MusicPlayerBase:
         async def decorator(interaction: Interaction) -> bool:
             isTrue: bool = True
             player: Player = interaction.guild.voice_client
-            if player and not player.is_playing():
-                await YggUtil.send_response(
-                    interaction,
-                    message="Can't do that. \nNothing is playing",
-                    emoji="📪",
-                )
+            if player and player.current is None:
+                await YggUtil.send_response(interaction, message="Can't do that. \nNothing is playing", emoji="📪")
                 isTrue = False
 
             return isTrue
@@ -508,128 +469,128 @@ class MusicPlayerBase:
             return f"{m:02d}m {s:02d}s"
 
     @staticmethod
-    async def _custom_wavelink_player(
-        query: str, track_type: TrackType, is_search: bool = False
-    ) -> Union[Playable, Playlist, SpotifyTrack, list[SpotifyTrack]]:
+    async def _custom_wavelink_player(query: str, track_type: TrackType, is_search: bool = False) -> Union[Playable, Playlist, SpotifyTrack, list[SpotifyTrack]]:
         """Will reeturn either List of tracks or Single Tracks"""
-        tracks: Union[Playable, Playlist, SpotifyTrack, list[SpotifyTrack]] = None
+        tracks: Union[Playable, Playlist,
+                      SpotifyTrack, list[SpotifyTrack]] = None
         search_limit: int = 30
-        track_type_spotify: SpotifySearchType = SpotifySearchType.track
 
         if track_type in (TrackType.YOUTUBE, TrackType.YOUTUBE_MUSIC):
-            if "playlist?" in query:
+            if 'playlist?' in query:
                 tracks: YouTubePlaylist = await YouTubePlaylist.search(query)
-                setattr(tracks, "uri", query)
             elif track_type is TrackType.YOUTUBE_MUSIC:
                 tracks: YouTubeMusicTrack = await YouTubeMusicTrack.search(query)
             else:
                 tracks: YouTubeTrack = await YouTubeTrack.search(query)
         elif track_type is TrackType.SOUNCLOUD:
-            if "sc-playlists" in query:
+            if 'sc-playlists' in query:
                 tracks: SoundCloudPlaylist = await SoundCloudPlaylist.search(query)
-                setattr(tracks, "uri", query)
             else:
                 tracks: SoundCloudTrack = await SoundCloudTrack.search(query)
         elif track_type is TrackType.SPOTIFY:
-            if "http" in query:
-                track_type_spotify: SpotifySearchType = decode_url(query).type
+            if 'http' in query:
                 tracks: list[SpotifyTrack] = await SpotifyTrack.search(query)
             else:
                 tracks: YouTubeTrack = await YouTubeTrack.search(query)
 
-        if is_search:
+        if isinstance(tracks, Playlist):
+            setattr(tracks, "uri", query)
+        elif is_search:
             tracks = tracks[0:search_limit]
-        elif (
-            not isinstance(tracks, Playlist)
-            and track_type_spotify is SpotifySearchType.track
-        ):
+        else:
             tracks = tracks[0]
 
         return tracks
 
-    async def _get_raw_spotify(self, uri: str) -> dict:
+    async def _get_raw_spotify(self, uri: str, is_playlist: bool = False) -> dict:
         node: Node = NodePool.get_connected_node()
-        decoded: SpotifyDecodePayload = decode_url(uri)
-        sp_client: SpotifyClient = node._spotify
-        if sp_client.is_token_expired():
-            await sp_client._get_bearer_token()
+        openable_link: str = "https://open.spotify.com/{track_type}/{id}"
+        uri_split: list[str] = uri.split(":")
+        id: str = uri_split[2]
+        track_type: str = uri_split[1]
+
         data: dict = dict()
 
-        uri = BASEURL.format(entity=decoded.type.name, identifier=decoded.id)
+        if is_playlist:
+            sp_client: SpotifyClient = node._spotify
+            if sp_client.is_token_expired():
+                await sp_client._get_bearer_token()
 
-        async with self._bot.session.get(uri, headers=sp_client.bearer_headers) as resp:
-            if resp.status == 400:
-                return None
+            uri = BASEURL.format(entity=track_type, identifier=id)
 
-            elif resp.status != 200:
-                raise SpotifyRequestError(resp.status, resp.reason)
+            async with self._bot.session.get(uri, headers=sp_client.bearer_headers) as resp:
+                if resp.status == 400:
+                    return None
 
-            data = await resp.json()
-            data.pop("tracks", None)
+                elif resp.status != 200:
+                    raise SpotifyRequestError(resp.status, resp.reason)
+
+                data = await resp.json()
+                data.pop("tracks",  None)
+
+        data['uri'] = openable_link.format(track_type=track_type, id=id)
 
         return data
 
-    async def _play_response(
-        self,
-        interaction: Interaction,
-        /,
-        track: Union[Playlist, Playable, SpotifyTrack, list[SpotifyTrack]],
-        is_playlist: bool,
-        is_queued: bool,
-        is_played: bool,
-        is_put_front: bool,
-        raw_query: str = None,
-    ) -> Embed:
-        embed: Embed = Embed(
-            color=YggUtil.convert_color(YggConfig.COLOR["success"]),
-            timestamp=YggUtil.get_time(),
-        )
+    async def _play_response(self, member: Member, /, track: Union[Playlist, Playable, SpotifyTrack, list[SpotifyTrack]],
+                             is_playlist: bool = False, is_queued: bool = False, is_put_front: bool = False, is_autoplay: bool = False) -> Embed:
+        embed: Embed = Embed(color=YggUtil.convert_color(
+            YggConfig.COLOR['success']), timestamp=YggUtil.get_time())
         embed.set_footer(
-            text=f"From {interaction.user.name} ",
-            icon_url=interaction.user.display_avatar,
-        )
+            text=f'From {member.name} ', icon_url=member.display_avatar)
+
+        if track.PREFIX == YouTubeMusicTrack.PREFIX:
+            track.uri = track.uri.replace(
+                "www", "music")
+
+        raw_data_spotify: dict = dict()
+
+        if isinstance(track, (list, SpotifyTrack)):
+            raw_data_spotify = await self._get_raw_spotify(track.uri, is_playlist=True if isinstance(track, list) else False)
 
         if is_playlist:
             playlist: Union[Playlist, list[SpotifyTrack]] = track
-            raw_data_spotify: dict = dict()
-
-            if raw_query is not None and isinstance(playlist, list):
-                raw_data_spotify = await self._get_raw_spotify(raw_query)
-
-            embed.description = f"✅ Queued {'(on front)' if is_put_front == 1 else ''} - {len(playlist.tracks)  if not isinstance(playlist, list) else len(playlist)} tracks from ** [{playlist.name if not isinstance(playlist, list) else raw_data_spotify['name']}]({playlist.uri if not isinstance(playlist, list) else raw_query})**"
+            embed.description = f"✅ Queued {'(on front)' if is_put_front == 1 else ''} - {len(playlist.tracks)  if not isinstance(playlist, list) else len(playlist)} \
+            tracks from ** [{playlist.name if not isinstance(playlist, list) else raw_data_spotify['name']}]({playlist.uri if not isinstance(playlist, list) else raw_data_spotify['uri']})**"
         elif is_queued:
-            embed.description = f"✅ Queued {'(on front)' if is_put_front == 1 else ''}- **[{track.title}]({track.uri if not isinstance(track, SpotifyTrack) else raw_query})**"
-        elif is_played:
-            embed.description = f"🎶 Playing - **[{track.title}]({track.uri if not isinstance(track, SpotifyTrack) else raw_query})**"
+            embed.description = f"✅ Queued {'(on front)' if is_put_front == 1 else ''} - **[{track.title}]({track.uri if not isinstance(track, SpotifyTrack) else raw_data_spotify['uri']})**"
+        else:
+            embed.description = f"🎶 Playing - **[{track.title}]({track.uri if not isinstance(track, SpotifyTrack) else raw_data_spotify['uri']})**"
+
+        if is_autoplay:
+            embed.description += " - Autoplay"
 
         return embed
 
-    def _record_timestamp(
-        self, guild_id: int, channel: int, interaction: Interaction
-    ) -> None:
+    def _record_timestamp(self, guild_id: int, interaction: Interaction) -> None:
         if not guild_id in self._guild_message:
             self._guild_message.update({guild_id: dict()})
 
-        if not "channel" in self._guild_message[guild_id]:
-            self._guild_message[guild_id].update({"channel": channel})
+        if not 'timestamp' in self._guild_message[guild_id]:
+            self._guild_message[guild_id].update(
+                {'timestamp': YggUtil.get_time()})
 
-        if not "timestamp" in self._guild_message[guild_id]:
-            self._guild_message[guild_id].update({"timestamp": YggUtil.get_time()})
-
-        if not "interaction" in self._guild_message[guild_id]:
-            self._guild_message[guild_id].update({"interaction": interaction})
+        self._guild_message[guild_id].update(
+            {'interaction': interaction})
 
     def _record_message(self, guild_id: int, message: int) -> None:
         self._guild_message[guild_id]["message"] = message
 
     async def _clear_message(self, guild_id: int) -> None:
-        channel: TextChannel = self._bot.get_channel(
-            self._guild_message[guild_id]["channel"]
-        )
-        message: Message = await channel.fetch_message(
-            self._guild_message[guild_id]["message"]
-        )
+        message: Message = self._guild_message[guild_id]['message']
         await message.delete()
+
+    async def _update_player(self, guild_id: int) -> None:
+        interaction: Interaction = self._guild_message[guild_id]['interaction']
+        player: Player = interaction.guild.voice_client
+
+        if player and (player.is_playing() or player.is_paused()):
+            message: Message = self._guild_message[interaction.guild_id]['message']
+
+            view: TrackView = TrackView(self, player=player)
+            embed: Embed = await view.create_embed()
+
+            await message.edit(embed=embed, view=view)
 
     # Event handling
 
@@ -639,45 +600,42 @@ class MusicPlayerBase:
 
     @commands.Cog.listener()
     async def on_wavelink_track_start(self, payload: TrackEventPayload) -> None:
-        player: Player = payload.player
-        interaction: Interaction = self._guild_message[player.guild.id]["interaction"]
-        channel: TextChannel = self._bot.get_channel(
-            self._guild_message[player.guild.id]["channel"]
-        )
+        player:  Player = payload.player
+        interaction: Interaction = self._guild_message[player.guild.id]['interaction']
+        channel: TextChannel = interaction.channel
+        message: Message = None
+
         track_view: TrackView = TrackView(self, player=player)
 
-        embed: Embed = await track_view.create_embed(interaction)
+        embed: Embed = await track_view.create_embed()
         message: Message = await channel.send(embed=embed)
-        self._record_message(guild_id=player.guild.id, message=message.id)
+        self._record_message(guild_id=player.guild.id, message=message)
         await message.edit(view=track_view)
 
     @commands.Cog.listener()
     async def on_wavelink_track_end(self, payload: TrackEventPayload) -> None:
         player: Player = payload.player
 
-        await gather(self._clear_message(player.guild.id))
+        await self._clear_message(player.guild.id)
 
         if not player.autoplay and not player.queue.is_empty:
             track: Union[Playable, SpotifyTrack] = await player.queue.get_wait()
             await player.play(track=track)
 
     @commands.Cog.listener()
-    async def on_wavelink_websocket_closed(
-        self, payload: WebsocketClosedPayload
-    ) -> None:
+    async def on_wavelink_websocket_closed(self, payload: WebsocketClosedPayload) -> None:
+        if payload.player.is_playing() or payload.player.is_paused():
+            await self._clear_message(payload.player.guild.id)
+
         if payload.by_discord:
             await payload.player.disconnect()
             del self._guild_message[payload.player.guild.id]
 
 
 class MusicPlayer(MusicPlayerBase):
+
     async def join(self, interaction: Interaction) -> None:
-        channel: VoiceChannel = interaction.user.voice.channel
-        self._record_timestamp(
-            guild_id=interaction.guild_id,
-            channel=interaction.channel_id,
-            interaction=interaction,
-        )
+        channel:  VoiceChannel = interaction.user.voice.channel
 
         await channel.connect(cls=Player)
 
@@ -686,33 +644,23 @@ class MusicPlayer(MusicPlayerBase):
 
         await player.disconnect()
 
-    async def search(
-        self, query: str, source: TrackType = TrackType.YOUTUBE
-    ) -> Tuple[Embed, View]:
+    async def search(self, query: str, user: Member, source: TrackType = TrackType.YOUTUBE, autoplay: bool = None) -> Tuple[Embed, View]:
         view: View = None
         embed: Embed = None
 
-        tracks: Union[
-            Playable, Playlist, SpotifyTrack, list[SpotifyTrack]
-        ] = await self._custom_wavelink_player(
-            query=query, track_type=source, is_search=True
-        )
-        view: SelectView = SelectView(self, data=tracks)
+        if query.startswith("http"):
+            source = TrackType.what_type(query)
+
+        tracks: Union[Playable, Playlist, SpotifyTrack, list[SpotifyTrack]] = await self._custom_wavelink_player(query=query, track_type=source, is_search=True)
+        view: SelectView = SelectView(self, user, data=tracks if not isinstance(
+            tracks, Playlist) else tracks.tracks, autoplay=autoplay)
         embed = view.get_embed
 
         return (embed, view)
 
-    async def play(
-        self,
-        interaction: Interaction,
-        /,
-        query: Union[str, Playable, SpotifyTrack],
-        source: TrackType = TrackType.YOUTUBE,
-        autoplay: bool = None,
-        force_play: bool = False,
-        put_front: bool = False,
-    ) -> Tuple[Union[Playable, Playlist, SpotifyTrack], bool, bool, bool]:
-        is_playlist = is_queued = is_played = False
+    async def play(self, interaction: Interaction, /, query: Union[str, Playable, SpotifyTrack], source: TrackType = TrackType.YOUTUBE,
+                   autoplay: bool = None, force_play: bool = False, put_front: bool = False) -> Tuple[Union[Playable, Playlist, SpotifyTrack], bool, bool]:
+        is_playlist = is_queued = False
         player: Player = None
 
         if not interaction.guild.voice_client:
@@ -720,22 +668,13 @@ class MusicPlayer(MusicPlayerBase):
         else:
             player = interaction.user.guild.voice_client
 
-        track_type: TrackType = (
-            TrackType.what_type(uri=query) if not isinstance(query, Playable) else None
-        ) or source
+        track_type: TrackType = (TrackType.what_type(
+            uri=query) if not isinstance(query, (Playable, SpotifyTrack)) else None) or source
 
         if not isinstance(query, (Playable, SpotifyTrack)):
-            tracks: Union[
-                Playable, Playlist, SpotifyTrack, list[SpotifyTrack]
-            ] = await self._custom_wavelink_player(query=query, track_type=track_type)
+            tracks: Union[Playable, Playlist, SpotifyTrack, list[SpotifyTrack]] = await self._custom_wavelink_player(query=query, track_type=track_type)
         else:
             tracks = query
-
-        self._record_timestamp(
-            guild_id=interaction.guild_id,
-            channel=interaction.channel_id,
-            interaction=interaction,
-        )
 
         if autoplay is None:
             player.autoplay = player.autoplay
@@ -748,14 +687,11 @@ class MusicPlayer(MusicPlayerBase):
                 player.queue.put_at_front(player.queue.history.pop())
 
             if put_front or force_play:
-                for track in reversed(
-                    playlist.tracks if isinstance(playlist, Playlist) else playlist
-                ):
+                for track in reversed(playlist.tracks if isinstance(playlist, Playlist) else playlist):
                     player.queue.put_at_front(track)
             else:
-                player.queue.extend(
-                    playlist.tracks if isinstance(playlist, Playlist) else playlist
-                )
+                player.queue.extend(playlist.tracks if isinstance(
+                    playlist, Playlist) else playlist)
 
             if force_play and player.is_playing():
                 await player.seek(player.current.length * 1000)
@@ -778,29 +714,17 @@ class MusicPlayer(MusicPlayerBase):
 
             is_queued = True
         else:
-            await player.play(
-                tracks,
-                populate=True
-                if autoplay and track_type is not TrackType.SOUNCLOUD
-                else False,
-            )
-            is_played = True
+            await player.play(tracks, populate=True if autoplay and track_type is not TrackType.SOUNCLOUD else False)
 
-        return (tracks, is_playlist, is_queued, is_played)
+        return (tracks, is_playlist, is_queued)
 
-    async def queue(
-        self, interaction: Interaction, /, is_history: bool = False
-    ) -> Tuple[Embed, View]:
+    async def queue(self, interaction: Interaction, /, is_history: bool = False) -> Tuple[Embed, View]:
         player: Player = interaction.user.guild.voice_client
         view: View = None
-        embed: Embed = Embed()
+        embed: Embed = None
 
-        view = QueueView(
-            queue=player.queue.history
-            if is_history
-            else chain(player.queue, player.auto_queue),
-            is_history=is_history,
-        )
+        view = QueueView(queue=player.queue.history if is_history else chain(
+            player.queue, player.auto_queue), is_history=is_history)
         embed = view.get_embed
 
         return (embed, view)
@@ -832,8 +756,7 @@ class MusicPlayer(MusicPlayerBase):
         embed: Embed = None
 
         view: SelectView = SelectView(
-            self, data=chain(player.queue, player.auto_queue), is_jump_command=True
-        )
+            self, interaction.user, data=chain(player.queue, player.auto_queue), is_jump_command=True)
         embed = view.get_embed
 
         return (embed, view)
@@ -842,7 +765,7 @@ class MusicPlayer(MusicPlayerBase):
         was_allowed: bool = True
         player: Player = interaction.user.guild.voice_client
 
-        if not player.queue.history.is_empty and not player.queue.history.count <= 1:
+        if not player.queue.history.is_empty and player.queue.history.count >= 1 and player.queue.history[player.queue.history.count - 1] is player.current:
             player.queue.put_at_front(player.queue.history.pop())
             player.queue.put_at_front(player.queue.history.pop())
             await player.seek(player.current.length * 1000)
