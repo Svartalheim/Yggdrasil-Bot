@@ -1,6 +1,6 @@
 server: # REST and WS server
   port: 2333
-  address: 0.0.0.0
+  address: localhost
 lavalink:
   server:
     password: "youshallnotpass"
@@ -24,7 +24,7 @@ lavalink:
     soundcloudSearchEnabled: false
     gc-warnings: true
     youtubeConfig:
-      email: "gboomers1234@gmail.com"
+      email: "gboomers111@gmail.com"
       password: "johnlille1"
     # ratelimit:
     #   strategy: 'LoadBalance'
