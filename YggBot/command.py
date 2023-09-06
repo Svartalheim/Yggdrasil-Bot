@@ -105,10 +105,10 @@ class Multimedia(commands.Cog, MusicPlayer):
 
     @command(name="play", description="To play a track from Youtube/Soundcloud/Spotify")
     @describe(query="Youtube/Soundcloud/Spotify link or keyword",
-              source="Get track from different source(Default is Youtube, Spotify will automatically convert into Youtube)",
-              autoplay="Autoplay recomendation from you've been played(Soundcloud not supported)",
-              force_play="Force to play the track(Previous queue still saved)",
-              put_front="Put track on front. Will play after current track end")
+              source="(OPTIONAL, still working without selecting any of this) Get track from different source(Default is Youtube, Spotify will automatically convert into Youtube)",
+              autoplay="(OPTIONAL) Autoplay recomendation from you've been played(Soundcloud not supported)",
+              force_play="(OPTIONAL) Force to play the track(Previous queue still saved)",
+              put_front="(OPTIONAL) Put track on front. Will play after current track end")
     @choices(autoplay=[
         Choice(name='True', value=1),
         Choice(name='False', value=0)],
@@ -305,12 +305,13 @@ class Multimedia(commands.Cog, MusicPlayer):
         time: int = int()
 
         player, time = self.now_playing(interaction)
-
+        YggUtil.simple_log(player.current.duration)
+        YggUtil.simple_log(time)
         embed: Embed = Embed(
             title="🎶 Now Playing",
             description=f"""**[{player.current.title}]({player.current.uri}) - {self._parseSec(player.current.duration)}** 
-            \n** {str(timedelta(seconds=time)).split('.')[0]} left**""",
-            color=YggUtil.convert_color(YggConfig.COLOR['play'])
+            \n** {str(timedelta(seconds=time//1000)).split('.')[0]} left**""",
+            color=YggUtil.convert_color(YggConfig.COLOR['general'])
         )
 
         await YggUtil.send_response(interaction, embed=embed)

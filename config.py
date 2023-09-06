@@ -1,7 +1,7 @@
 from os import getenv
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 
-load_dotenv()
+# load_dotenv()
 
 class YggConfig:
     BOT_NAME = "Yggdrasil Bot"

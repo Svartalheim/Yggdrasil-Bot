@@ -55,7 +55,7 @@ class YggTask:
             )
 
         async def c() -> None:
-            competing_list=["Hell Like Heaven", "\"Flower on a High Peak\"", "Obscurity"]
+            competing_list=["Hell Like Heaven", "\"Flower on a High Peak\""]
             await self.change_presence(
                 status=Status.idle,
                 activity=Activity(
@@ -65,7 +65,7 @@ class YggTask:
             )
             
         async def d() -> None:
-            watching_list=["Ragnarok", "Dramaturgy"]
+            watching_list=["Ragnarok"]
             await self.change_presence(
                 status=Status.idle,
                 activity=Activity(
@@ -110,6 +110,7 @@ class YggClient(YggBase, YggTask):
     def __init__(self) -> None:
         intents: Intents = Intents.default()
         intents.members = True
+        intents.message_content = True
 
         super().__init__(YggConfig.BOT_PREFIX, intents=intents)
 
