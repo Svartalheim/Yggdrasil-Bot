@@ -158,7 +158,7 @@ class Multimedia(commands.Cog, MusicPlayer):
                                                             force_play=convert_force_play,
                                                             put_front=convert_put_front)
 
-            embed = await self._play_response(interaction.user, track=track, is_playlist=is_playlist, is_queued=is_queued, is_put_front=convert_put_front, is_autoplay=convert_autoplay)
+            embed = await self._play_response(interaction.user, track=track, is_playlist=is_playlist, is_queued=is_queued, is_put_front=convert_put_front, is_autoplay=convert_autoplay, raw_uri=query)
         except IndexError:
             pass
 
