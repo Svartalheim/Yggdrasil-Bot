@@ -13,7 +13,7 @@ from wavelink.ext.spotify import SpotifyClient
 from random import choice
 from YggBot import YggUtil
 from discord import Status
-
+from aiohttp import ClientSession
 
 class YggTask:
     async def _begin_loop_task(self):
@@ -117,6 +117,8 @@ class YggClient(YggBase, YggTask):
         self.synced: bool = False
 
     async def setup_hook(self) -> None:
+        self.session: ClientSession = ClientSession()
+
         YggUtil.setup_log()
 
         self.loop.create_task(self._connect_nodes(self))

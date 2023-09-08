@@ -305,8 +305,6 @@ class Multimedia(commands.Cog, MusicPlayer):
         time: int = int()
 
         player, time = self.now_playing(interaction)
-        YggUtil.simple_log(player.current.duration)
-        YggUtil.simple_log(time)
         embed: Embed = Embed(
             title="🎶 Now Playing",
             description=f"""**[{player.current.title}]({player.current.uri}) - {self._parseSec(player.current.duration)}** 
@@ -391,8 +389,8 @@ class Multimedia(commands.Cog, MusicPlayer):
             create_task(self._update_player(guild_id=interaction.guild_id))
         ])
 
-    async def cog_app_command_error(self, interaction: Interaction, error: AppCommandError) -> None:
-        if not isinstance(error, CheckFailure):
-            await YggUtil.send_response(interaction, message=f"Unknown error, {Exception(error)}", emoji="❓")
+    # async def cog_app_command_error(self, interaction: Interaction, error: AppCommandError) -> None:
+    #     if not isinstance(error, CheckFailure):
+    #         await YggUtil.send_response(interaction, message=f"Unknown error, {Exception(error)}", emoji="❓")
 
-        return await super().cog_app_command_error(interaction, error)
+    #     return await super().cog_app_command_error(interaction, error)

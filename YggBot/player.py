@@ -52,7 +52,7 @@ from wavelink.ext.spotify import (
 
 from .util import YggUtil
 from config import YggConfig
-
+from wavelink.types.track import Track as TrackPayload
 
 class CustomYoutubeMusic(YouTubeMusicTrack):
 
@@ -90,7 +90,7 @@ class TrackView(View):
 
         embed = Embed(
             title="🎶 Now Playing",
-            color=YggUtil.convert_color(YggConfig.COLOR['play']),
+            color=YggUtil.convert_color(YggConfig.COLOR['general']),
             description=f"**[{self._player.current.title}]({self._player.current.uri}) - {self._track_control._parseSec(self._player.current.duration)}**",
             timestamp=interaction.created_at
         )
@@ -209,7 +209,7 @@ class SelectView(View):
         self._pass_data_to_option()
         embed: Embed = Embed(title="🔍 Here's the result" if not self._is_jump_command else "⏭️ Jump to which track?",
                              description="To play/queue the track, open the dropdown menu and select the desired track. Your track will be played/queued after this",
-                             color=YggUtil.convert_color(YggConfig.COLOR['queue']))
+                             color=YggUtil.convert_color(YggConfig.COLOR['general']))
 
         return embed
 
@@ -281,7 +281,7 @@ class QueueView(View):
 
         embed: Embed = Embed(
             title=f"📃 Queue {'history' if self._is_history else ''} - Page {self._current_page} of {int(len(self._data) / self._limit_show) + 1}",
-            color=YggUtil.convert_color(YggConfig.COLOR['queue']))
+            color=YggUtil.convert_color(YggConfig.COLOR['general']))
         count: int = (self._current_page-1) * \
             self._limit_show if self._current_page != 1 else 0
         embed.description = str()
@@ -507,9 +507,9 @@ class MusicPlayerBase:
         search_limit: int = 30
 
         if track_type in (TrackType.YOUTUBE, TrackType.YOUTUBE_MUSIC):
-            if 'playlist?' in query:
-                is_playlist = True
-                tracks: YouTubePlaylist = await YouTubePlaylist.search(query)
+            # if 'playlist?' in query:
+            #     is_playlist = True
+                # tracks: YouTubePlaylist = await YouTubePlaylist.search(query)
 
             if track_type is TrackType.YOUTUBE_MUSIC:
                 if is_playlist:
@@ -582,7 +582,6 @@ class MusicPlayerBase:
 
         if raw_uri and isinstance(track, list):
             raw_data_spotify = await _get_raw_spotify_playlist(raw_uri)
-
         if is_playlist:
             playlist: Union[Playlist, list[SpotifyTrack]] = track
             embed.description = f"✅ Queued {'(on front)' if is_put_front == 1 else ''} - {len(playlist.tracks)  if not isinstance(playlist, list) else len(playlist)} \
@@ -639,9 +638,7 @@ class MusicPlayerBase:
         interaction: Interaction = self._guild_message[player.guild.id]['interaction']
         channel: TextChannel = interaction.channel
         message: Message = None
-
         track_view: TrackView = TrackView(self, player=player)
-
         embed: Embed = await track_view.create_embed()
         message: Message = await channel.send(embed=embed)
         self._record_message(guild_id=player.guild.id, message=message)
@@ -662,7 +659,7 @@ class MusicPlayerBase:
     @commands.Cog.listener()
     async def on_wavelink_websocket_closed(self, payload: WebsocketClosedPayload) -> None:
         if payload.player.is_playing() or payload.player.is_paused():
-            await wait([self._clear_message(payload.player.guild.id)])
+            await wait([create_task(self._clear_message(payload.player.guild.id))])
 
         if payload.by_discord:
             await payload.player.disconnect()
@@ -732,7 +729,6 @@ class MusicPlayer(MusicPlayerBase):
 
             if force_play and player.is_playing():
                 await player.seek(player.current.length * 1000)
-
             if not player.is_playing():
                 trck: Union[Playable, SpotifyTrack] = await player.queue.get_wait()
                 if isinstance(trck, SpotifyTrack):
@@ -759,7 +755,6 @@ class MusicPlayer(MusicPlayerBase):
                 trck = await trck.fulfill(player=player, cls=CustomYoutubeMusic,
                                               populate=True if autoplay and track_type is not TrackType.SOUNCLOUD else False)
             await player.play(trck, populate=True if autoplay and track_type is not TrackType.SOUNCLOUD else False)
-
         return (tracks, is_playlist, is_queued)
 
     async def queue(self, interaction: Interaction, /, is_history: bool = False) -> Tuple[Embed, View]:
