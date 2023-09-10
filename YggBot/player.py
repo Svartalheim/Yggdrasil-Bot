@@ -29,9 +29,11 @@ from wavelink import (
     QueueEmpty,
     BaseQueue,
 )
-from wavelink.player import Player
+from wavelink.player import (
+    Player,
+    Queue,
+)
 from wavelink.tracks import (
-    YouTubePlaylist,
     YouTubeTrack,
     YouTubeMusicTrack,
     SoundCloudPlaylist,
@@ -223,18 +225,18 @@ class SelectView(View):
         control,
         author: Member,
         /,
-        data: list[Union[Playable, SpotifyTrack]],
+        data: list[Playable | SpotifyTrack],
         is_jump_command: bool = False,
         autoplay: bool = None,
         *,
         timeout: float | None = 180,
     ):
-        self._data: list[Union[Playable, SpotifyTrack]] = list(data)[
+        self._data: list[Playable | SpotifyTrack] = list(data)[
             0 : self.SHOW_LIMIT
         ]
         self._track_control: MusicPlayer = control
         self._author: Member = author
-        self._selected: Union[Playable, SpotifyTrack] = None
+        self._selected: Playable | SpotifyTrack = None
         self._is_jump_command: bool = is_jump_command
         self._autoplay: bool = autoplay
         self.rand_emoji: list(str) = ["🎼", "🎵", "🎶", "🎸", "🎷", "🎺", "🎹", "🥁", "🪕", "🎻"]
@@ -317,14 +319,9 @@ class SelectView(View):
 
 
 class QueueView(View):
-    def __init__(
-        self,
-        queue: Union[chain, BaseQueue],
-        is_history: bool = False,
-        *,
-        timeout: float | None = 180,
-    ):
-        self._data: list[Union[Playable, SpotifyTrack]] = list(queue)
+
+    def __init__(self, queue: chain | BaseQueue, is_history: bool = False, *, timeout: float | None = 180):
+        self._data: list[Playable | SpotifyTrack] = list(queue)
         for x in self._data:
             if isinstance(x, SpotifyTrack):
                 x = MusicPlayerBase._spotify_patcher(x)
@@ -361,7 +358,7 @@ class QueueView(View):
 
         return embed
 
-    def _get_current_page_data(self) -> list[Union[Playable, SpotifyTrack]]:
+    def _get_current_page_data(self) -> list[Playable | SpotifyTrack]:
         start_index = 0
         end_index = self._limit_show
 
@@ -573,19 +570,22 @@ class MusicPlayerBase:
                 key["timestamp"] + timedelta(minutes=self._timeout_minutes)
             ):
                 guild: Guild = self._bot.get_guild(id)
-                if not guild.id == 623123009770749974:
+                if not guild.id == YggConfig.KANTIN_YOYOK_ID:
                     voice_client: VoiceClient = guild.voice_client
                     if not voice_client.is_playing() and not voice_client.is_paused():
                         interaction: Interaction = self._guild_message[id]["interaction"]
                         channel: TextChannel = self._bot.get_channel(interaction.channel_id)
                         embed: Embed = Embed(
-                            description="I'm stepping away because I haven't been active for the past hour. Feel free to summon me whenever you need, as I'm still here and ready to respond. This helps reduce server load.",
+                            description="I'm stepping away because I haven't been active for the past hour. \
+                                Feel free to summon me whenever you need, as I'm still here and ready to respond. This helps reduce server load.",
                             color=YggUtil.convert_color(YggConfig.COLOR["general"]),
                             timestamp=YggUtil.get_time(),
                         )
                         msg: Message = await channel.send(embed=embed)
-                        await msg.add_reaction("💨")
-                        await voice_client.disconnect()
+                        await wait([
+                            create_task(msg.add_reaction("💨")),
+                            create_task(voice_client.disconnect())
+                        ])
                     else:
                         self._guild_message[id]["timestamp"] = YggUtil.get_time()
 
@@ -625,9 +625,6 @@ class MusicPlayerBase:
         search_limit: int = 30
 
         if track_type in (TrackType.YOUTUBE, TrackType.YOUTUBE_MUSIC):
-            # if 'playlist?' in query:
-            #     is_playlist = True
-            # tracks: YouTubePlaylist = await YouTubePlaylist.search(query)
 
             if track_type is TrackType.YOUTUBE_MUSIC:
                 if is_playlist:
@@ -717,7 +714,7 @@ class MusicPlayerBase:
         if raw_uri and isinstance(track, list):
             raw_data_spotify = await _get_raw_spotify_playlist(raw_uri)
         if is_playlist:
-            playlist: Union[Playlist, list[SpotifyTrack]] = track
+            playlist: Playlist | list[SpotifyTrack] = track
             embed.description = f"✅ Queued {'(on front)' if is_put_front == 1 else ''} - {len(playlist.tracks)  if not isinstance(playlist, list) else len(playlist)} \
             tracks from ** [{playlist.name if not isinstance(playlist, list) else raw_data_spotify['name']}]({raw_uri if not isinstance(playlist, list) else raw_data_spotify['uri']})**"
         elif is_queued:
@@ -876,9 +873,11 @@ class MusicPlayer(MusicPlayerBase):
             player.autoplay = player.autoplay
         else:
             player.autoplay = autoplay
+            if not player.autoplay:
+                player.auto_queue = Queue()
 
         if isinstance(tracks, (Playlist, list)):
-            playlist: Union[Playlist, list[SpotifyTrack]] = tracks
+            playlist: Playlist | list[SpotifyTrack] = tracks
             if force_play:
                 player.queue.put_at_front(player.queue.history.pop())
 
@@ -895,7 +894,7 @@ class MusicPlayer(MusicPlayerBase):
             if force_play and player.is_playing():
                 await player.seek(player.current.length * 1000)
             if not player.is_playing():
-                trck: Union[Playable, SpotifyTrack] = await player.queue.get_wait()
+                trck: Playable | SpotifyTrack = await player.queue.get_wait()
                 if isinstance(trck, SpotifyTrack):
                     trck = await trck.fulfill(
                         player=player, cls=CustomYoutubeMusic, populate=False
@@ -911,7 +910,7 @@ class MusicPlayer(MusicPlayerBase):
 
             if put_front:
                 player.queue.put_at_front(tracks)
-            else:
+            elif not force_play:
                 await player.queue.put_wait(tracks)
 
             is_queued = True
@@ -954,7 +953,7 @@ class MusicPlayer(MusicPlayerBase):
         player: Player = interaction.user.guild.voice_client
 
         if index is not None:
-            track: Union[Playable, SpotifyTrack] = None
+            track: Playable | SpotifyTrack = None
 
             if index < player.queue.count:
                 track = player.queue[index]
