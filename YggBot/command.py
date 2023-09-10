@@ -306,9 +306,9 @@ class Multimedia(commands.Cog, MusicPlayer):
 
         player, time = self.now_playing(interaction)
         embed: Embed = Embed(
-            title="🎶 Now Playing",
+            title=":notes: Now Playing",
             description=f"""**[{player.current.title}]({player.current.uri}) - {self._parseSec(player.current.duration)}** 
-            \n** {str(timedelta(seconds=time//1000)).split('.')[0]} left**""",
+            \n** {str(timedelta(seconds=time)).split('.')[0]} left**""",
             color=YggUtil.convert_color(YggConfig.COLOR['general'])
         )
 
@@ -389,8 +389,8 @@ class Multimedia(commands.Cog, MusicPlayer):
             create_task(self._update_player(guild_id=interaction.guild_id))
         ])
 
-    # async def cog_app_command_error(self, interaction: Interaction, error: AppCommandError) -> None:
-    #     if not isinstance(error, CheckFailure):
-    #         await YggUtil.send_response(interaction, message=f"Unknown error, {Exception(error)}", emoji="❓")
+    async def cog_app_command_error(self, interaction: Interaction, error: AppCommandError) -> None:
+        if not isinstance(error, CheckFailure):
+            await YggUtil.send_response(interaction, message=f"Unknown error, {Exception(error)}", emoji="❓")
 
-    #     return await super().cog_app_command_error(interaction, error)
+        return await super().cog_app_command_error(interaction, error)
