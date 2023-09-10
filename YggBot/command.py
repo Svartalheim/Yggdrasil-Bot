@@ -1,4 +1,4 @@
-from asyncio import wait, create_task, gather
+from asyncio import wait, create_task
 from datetime import timedelta
 from typing import Union
 
@@ -24,10 +24,7 @@ from config import YggConfig
 
 
 async def setup(bot: commands.Bot) -> None:
-    cog_tasks = [
-        bot.add_cog(Multimedia(bot))
-    ]
-    await gather(*cog_tasks)
+    await bot.add_cog(Multimedia(bot))
 
     YggUtil.simple_log("Cog loaded")
 
@@ -171,7 +168,6 @@ class Multimedia(commands.Cog, MusicPlayer):
         Choice(name='False', value=0)])
     @MusicPlayerBase._is_client_exist()
     @MusicPlayerBase._is_user_allowed()
-    @MusicPlayerBase._is_playing()
     async def _queue(self, interaction: Interaction, is_history: Choice[int] = 0) -> None:
         await interaction.response.defer(ephemeral=True)
 
