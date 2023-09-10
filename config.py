@@ -14,4 +14,4 @@ class YggConfig:
     LAVALINK_SERVER = getenv("LAVALINK_SERVER")
     LAVALINK_PASSWORD = getenv("LAVALINK_PASSWORD")
 
-    KANTIN_YOYOK_ID = getenv("KANTIN_YOYOK_ID")
+    KANTIN_YOYOK_ID = int(getenv("KANTIN_YOYOK_ID"))
