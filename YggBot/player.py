@@ -29,10 +29,7 @@ from wavelink import (
     QueueEmpty,
     BaseQueue,
 )
-from wavelink.player import (
-    Player,
-    Queue,
-)
+from wavelink.player import Player
 from wavelink.tracks import (
     YouTubeTrack,
     YouTubeMusicTrack,
@@ -874,7 +871,7 @@ class MusicPlayer(MusicPlayerBase):
         else:
             player.autoplay = autoplay
             if not player.autoplay:
-                player.auto_queue = Queue()
+                player.auto_queue.clear()
 
         if isinstance(tracks, (Playlist, list)):
             playlist: Playlist | list[SpotifyTrack] = tracks
