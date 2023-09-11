@@ -36,7 +36,7 @@ class YggTask:
         await bot.wait_until_ready()
         member_count: int = len([x for x in self.get_all_members()])
 
-        async def a() -> None:
+        async def __a() -> None:
             await self.change_presence(
                 status=Status.idle,
                 activity=Activity(
@@ -45,7 +45,7 @@ class YggTask:
                 )
             )
 
-        async def b() -> None:
+        async def __b() -> None:
             await self.change_presence(
                 status=Status.idle,
                 activity=Activity(
@@ -54,7 +54,7 @@ class YggTask:
                 )
             )
 
-        async def c() -> None:
+        async def __c() -> None:
             competing_list=["Hell Like Heaven", "\"Flower on a High Peak\""]
             await self.change_presence(
                 status=Status.idle,
@@ -64,7 +64,7 @@ class YggTask:
                 )
             )
             
-        async def d() -> None:
+        async def __d() -> None:
             watching_list=["Ragnarok"]
             await self.change_presence(
                 status=Status.idle,
@@ -74,7 +74,7 @@ class YggTask:
                 )
             )
             
-        async def e() -> None:
+        async def __e() -> None:
             await self.change_presence(
                 status=Status.idle,
                 activity=Activity(
@@ -83,7 +83,7 @@ class YggTask:
                 )
             )
 
-        await choice([a, b, c, d, e])()
+        await choice([__a, __b, __c, __d, __e])()
 
 
 class YggBase(commands.Bot):
