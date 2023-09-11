@@ -4,7 +4,6 @@ from typing import Union, Tuple
 from itertools import chain
 from random import choice
 from enum import Enum
-
 from discord import (
     Member,
     Interaction,
@@ -35,6 +34,7 @@ from wavelink.player import (
 )
 from wavelink.tracks import (
     YouTubeTrack,
+    YouTubePlaylist,
     YouTubeMusicTrack,
     SoundCloudPlaylist,
     SoundCloudTrack,
@@ -55,6 +55,7 @@ from wavelink.ext.spotify import (
 from .util import YggUtil
 from config import YggConfig
 from wavelink.types.track import Track as TrackPayload
+import re
 
 
 class CustomYoutubeMusic(YouTubeMusicTrack):
@@ -231,9 +232,7 @@ class SelectView(View):
         *,
         timeout: float | None = 180,
     ):
-        self._data: list[Playable | SpotifyTrack] = list(data)[
-            0 : self.SHOW_LIMIT
-        ]
+        self._data: list[Playable | SpotifyTrack] = list(data)[0 : self.SHOW_LIMIT]
         self._track_control: MusicPlayer = control
         self._author: Member = author
         self._selected: Playable | SpotifyTrack = None
@@ -319,8 +318,13 @@ class SelectView(View):
 
 
 class QueueView(View):
-
-    def __init__(self, queue: chain | BaseQueue, is_history: bool = False, *, timeout: float | None = 180):
+    def __init__(
+        self,
+        queue: chain | BaseQueue,
+        is_history: bool = False,
+        *,
+        timeout: float | None = 180,
+    ):
         self._data: list[Playable | SpotifyTrack] = list(queue)
         for x in self._data:
             if isinstance(x, SpotifyTrack):
@@ -573,8 +577,12 @@ class MusicPlayerBase:
                 if not guild.id == YggConfig.KANTIN_YOYOK_ID:
                     voice_client: VoiceClient = guild.voice_client
                     if not voice_client.is_playing() and not voice_client.is_paused():
-                        interaction: Interaction = self._guild_message[id]["interaction"]
-                        channel: TextChannel = self._bot.get_channel(interaction.channel_id)
+                        interaction: Interaction = self._guild_message[id][
+                            "interaction"
+                        ]
+                        channel: TextChannel = self._bot.get_channel(
+                            interaction.channel_id
+                        )
                         embed: Embed = Embed(
                             description="I'm stepping away because I haven't been active for the past hour. \
                                 Feel free to summon me whenever you need, as I'm still here and ready to respond. This helps reduce server load.",
@@ -582,10 +590,12 @@ class MusicPlayerBase:
                             timestamp=YggUtil.get_time(),
                         )
                         msg: Message = await channel.send(embed=embed)
-                        await wait([
-                            create_task(msg.add_reaction("💨")),
-                            create_task(voice_client.disconnect())
-                        ])
+                        await wait(
+                            [
+                                create_task(msg.add_reaction("💨")),
+                                create_task(voice_client.disconnect()),
+                            ]
+                        )
                     else:
                         self._guild_message[id]["timestamp"] = YggUtil.get_time()
 
@@ -615,9 +625,19 @@ class MusicPlayerBase:
 
         return child
 
+    @classmethod
+    def _extract_base_youtube_url(self, url: str) -> str:
+        pattern = r"(https://www\.youtube\.com/watch\?v=[^&]+)"
+        match = re.search(pattern, url)
+
+        if match:
+            return match.group(1)
+        else:
+            return None
+
     @staticmethod
     async def _custom_wavelink_player(
-        query: str, track_type: TrackType, is_search: bool = False
+        self, query: str, track_type: TrackType, is_search: bool = False
     ) -> Union[Playable, Playlist, SpotifyTrack, list[SpotifyTrack]]:
         """Will return either List of tracks or Single Tracks"""
         tracks: Union[Playable, Playlist, SpotifyTrack, list[SpotifyTrack]] = list()
@@ -625,7 +645,10 @@ class MusicPlayerBase:
         search_limit: int = 30
 
         if track_type in (TrackType.YOUTUBE, TrackType.YOUTUBE_MUSIC):
-
+            if "&list" in query:
+                query = self._extract_base_youtube_url(query)
+            elif "playlist?" in query:
+                is_playlist = True
             if track_type is TrackType.YOUTUBE_MUSIC:
                 if is_playlist:
                     tracks.tracks = [
@@ -826,7 +849,7 @@ class MusicPlayer(MusicPlayerBase):
         tracks: Union[
             Playable, Playlist, SpotifyTrack, list[SpotifyTrack]
         ] = await self._custom_wavelink_player(
-            query=query, track_type=source, is_search=True
+            self, query=query, track_type=source, is_search=True
         )
         view: SelectView = SelectView(
             self,
@@ -865,7 +888,9 @@ class MusicPlayer(MusicPlayerBase):
         if not isinstance(query, (Playable, SpotifyTrack)):
             tracks: Union[
                 Playable, Playlist, SpotifyTrack, list[SpotifyTrack]
-            ] = await self._custom_wavelink_player(query=query, track_type=track_type)
+            ] = await self._custom_wavelink_player(
+                self, query=query, track_type=track_type
+            )
         else:
             tracks = query
 
