@@ -1,21 +1,27 @@
+from random import choice
+
+from aiohttp import ClientSession
+
 from discord import (
     Intents,
     Embed,
     Interaction,
     Activity,
     ActivityType,
+    Status
 )
 from discord.app_commands import guild_only
 from discord.ext import commands, tasks
+
 from wavelink import Node, NodePool
-from config import YggConfig
 from wavelink.ext.spotify import SpotifyClient
-from random import choice
+
 from YggBot import YggUtil
-from discord import Status
-from aiohttp import ClientSession
+from config import YggConfig
+
 
 class YggTask:
+
     async def _begin_loop_task(self):
         if not self._change_activity.is_running():
             self._change_activity.start()
@@ -32,7 +38,7 @@ class YggTask:
         await NodePool.connect(client=bot, nodes=[node], spotify=sc)
 
     @tasks.loop(seconds=60)
-    async def _change_activity(self) -> None:
+    async def _change_activity(self: commands.Bot) -> None:
         await bot.wait_until_ready()
         member_count: int = len([x for x in self.get_all_members()])
 
@@ -55,7 +61,7 @@ class YggTask:
             )
 
         async def __c() -> None:
-            competing_list=["Hell Like Heaven", "\"Flower on a High Peak\""]
+            competing_list = ["Hell Like Heaven", "\"Flower on a High Peak\""]
             await self.change_presence(
                 status=Status.idle,
                 activity=Activity(
@@ -63,9 +69,9 @@ class YggTask:
                     name=choice(competing_list),
                 )
             )
-            
+
         async def __d() -> None:
-            watching_list=["Ragnarok"]
+            watching_list = ["Ragnarok"]
             await self.change_presence(
                 status=Status.idle,
                 activity=Activity(
@@ -73,7 +79,7 @@ class YggTask:
                     name=choice(watching_list),
                 )
             )
-            
+
         async def __e() -> None:
             await self.change_presence(
                 status=Status.idle,
@@ -99,7 +105,8 @@ class YggBase(commands.Bot):
             embed.add_field(
                 name=f"**/{command.name}**", value=command.description, inline=True
             )
-        embed.set_author(name=self.user.name, icon_url=self.user.display_avatar)
+        embed.set_author(name=self.user.name,
+                         icon_url=self.user.display_avatar)
         embed.set_footer(
             text=f" © {bot_name} • Still under develop, if there is something wrong contact @svartalheim"
         )
@@ -145,7 +152,8 @@ bot: commands.Bot = YggClient()
 @bot.tree.command(name="help", description="Help user to find command")
 @guild_only()
 async def _help(interaction: Interaction) -> None:
-    YggUtil.simple_log(f"{interaction.guild.me.name} AKA {interaction.guild.me.nick}")
+    YggUtil.simple_log(
+        f"{interaction.guild.me.name} AKA {interaction.guild.me.nick}")
     bot_name = ""
     if interaction.guild.me.nick is None:
         bot_name = interaction.guild.me.name
@@ -157,7 +165,7 @@ async def _help(interaction: Interaction) -> None:
             interaction.guild.name,
             bot_name,
         ),
-  
+
     )
 
 

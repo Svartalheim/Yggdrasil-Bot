@@ -1,31 +1,45 @@
-from typing import Union
-from logging import Logger, getLogger, INFO, StreamHandler
+from datetime import datetime
+from logging import (
+    Logger,
+    getLogger,
+    INFO,
+    StreamHandler
+)
+
+from pytz import timezone
+
 from discord import (
     Embed,
     Emoji,
     Interaction,
     Message,
     InteractionResponded,
-    MessageFlags,
+    MessageFlags
 )
 from discord.utils import _ColourFormatter
 from discord.ui import View
+
 from config import YggConfig
-from datetime import datetime
-from pytz import timezone
 
 
 class YggUtil:
-    @classmethod
-    def convert_color(cls, color: str) -> int:
+
+    @staticmethod
+    def convert_color(color: str) -> int:
         return int(color.lstrip("#"), 16)
 
-    @classmethod
-    def get_time(cls) -> datetime:
+    @staticmethod
+    def get_time() -> datetime:
         return datetime.now(timezone(YggConfig.TIMEZONE))
 
-    @classmethod
-    def setup_log(cls):
+    @staticmethod
+    def truncate_string(text: str, /, max: int = 150) -> str:
+        if len(text) > max:
+            return text[:max-3] + "..."
+        return text
+
+    @staticmethod
+    def setup_log():
         logger: Logger = getLogger(YggConfig.BOT_NAME)
         logger.setLevel(INFO)
 
@@ -33,19 +47,18 @@ class YggUtil:
         handler.setFormatter(_ColourFormatter())
         logger.addHandler(handler)
 
-    @classmethod
-    def simple_log(cls, message: str):
+    @staticmethod
+    def simple_log(message: str):
         logger: Logger = getLogger(YggConfig.BOT_NAME)
         logger.info(message)
 
-    @classmethod
+    @staticmethod
     async def send_response(
-        cls,
         interaction: Interaction,
         /,
         message: str = None,
         embed: Embed = None,
-        emoji: Union[Emoji, str] = None,
+        emoji: Emoji | str = None,
         view: View = None,
         ephemeral: bool = False,
     ) -> Message:
@@ -56,7 +69,7 @@ class YggUtil:
             view = View()
 
         def change_emoji(
-            message: str, emoji: Union[Emoji, str], ephemeral: bool = False
+            message: str, emoji: Emoji | str, ephemeral: bool = False
         ) -> str:
             if isinstance(emoji, str) and ephemeral:
                 return f"{emoji} {message}"

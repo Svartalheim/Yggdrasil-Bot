@@ -5,31 +5,30 @@ from discord import Interaction, Embed
 from discord.ext import commands
 from discord.app_commands import (
     Choice,
+    CheckFailure,
     AppCommandError,
     describe,
     choices,
     command,
-    guild_only,
-    CheckFailure,
+    guild_only
 )
 from discord.ui import View
 
-from wavelink import Playable, Player, Playlist, QueueEmpty
+from wavelink import Playable, Playlist, QueueEmpty
 from wavelink.ext.spotify import SpotifyTrack
 
 from .util import YggUtil
-from .player import MusicPlayerBase, MusicPlayer, TrackType
+from .player import TrackPlayerDecorator, TrackPlayer, TrackType
 from config import YggConfig
 
-
 async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(Multimedia(bot))
+    await bot.add_cog(Multimedia(bot=bot))
 
     YggUtil.simple_log("Cog loaded")
 
 
 @guild_only()
-class Multimedia(commands.Cog, MusicPlayer):
+class Multimedia(commands.Cog, TrackPlayer):
 
     def __init__(self, bot: commands.Bot) -> None:
         self._bot = bot
@@ -48,7 +47,7 @@ class Multimedia(commands.Cog, MusicPlayer):
         return super().interaction_check(interaction)
 
     @command(name="join", description="Join an voice channel")
-    @MusicPlayerBase._is_user_join_checker()
+    @TrackPlayerDecorator.is_user_join_checker()
     async def _join(self, interaction: Interaction) -> None:
         await wait([
             create_task(self.join(interaction)),
@@ -57,9 +56,9 @@ class Multimedia(commands.Cog, MusicPlayer):
         ])
 
     @command(name="leave", description="Leave the voice channel")
-    @MusicPlayerBase._is_user_join_checker()
-    @MusicPlayerBase._is_client_exist()
-    @MusicPlayerBase._is_user_allowed()
+    @TrackPlayerDecorator.is_user_join_checker()
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
     async def _leave(self, interaction: Interaction) -> None:
         await wait([
             create_task(self.leave(interaction)),
@@ -68,43 +67,11 @@ class Multimedia(commands.Cog, MusicPlayer):
         ])
 
     @command(name="search", description="Search your track by query")
-    @describe(query="Track keyword(You can pass through playlist to pick on it)", 
-              source="Get track from different source(Default is Youtube, Spotify will automatically convert into Youtube)",
-              autoplay="Autoplay recomendation from you've been played(Soundcloud not supported)")
-    @choices(autoplay=[
-        Choice(name='True', value=1),
-        Choice(name='False', value=0)])
-    @MusicPlayerBase._is_user_join_checker()
-    @MusicPlayerBase._is_user_allowed()
-    async def _search(self, interaction: Interaction, query: str, source: TrackType = TrackType.YOUTUBE, autoplay: Choice[int] = 0) -> None:
-        await interaction.response.defer()
-        convert_autoplay: bool = False
-        view: View = View()
-        embed: Embed = Embed(color=YggUtil.convert_color(
-            YggConfig.COLOR['failed']))
-        
-        autoplay = Choice(
-            name="None", value=None) if autoplay == 0 else autoplay
-        
-        if autoplay.value == None:
-            convert_autoplay = None
-
-        if autoplay.value == 1:
-            convert_autoplay = True
-
-        try:
-            embed, view = await self.search(query=query, user=interaction.user, source=source, autoplay=convert_autoplay)
-        except IndexError:
-            embed.description = "❌ Track not found, check your keyword or source"
-
-        await YggUtil.send_response(interaction, embed=embed, view=view)
-
-    @command(name="play", description="To play a track from Youtube/Soundcloud/Spotify")
-    @describe(query="Youtube/Soundcloud/Spotify link or keyword",
-              source="(OPTIONAL, still working without selecting any of this) Get track from different source(Default is Youtube, Spotify will automatically convert into Youtube)",
-              autoplay="(OPTIONAL) Autoplay recomendation from you've been played(Soundcloud not supported)",
-              force_play="(OPTIONAL) Force to play the track(Previous queue still saved)",
-              put_front="(OPTIONAL) Put track on front. Will play after current track end")
+    @describe(query="YouTube/Soundcloud/Spotify link or keyword",
+              source="Get track from different source(Default is YouTube, Spotify will automatically convert into YouTube/YouTubeMusic)",
+              autoplay="Autoplay recomendation from you've been played(Soundcloud not supported)",
+              force_play="Force to play the track(Previous queue still saved)",
+              put_front="Put track on front. Will play after current track end")
     @choices(autoplay=[
         Choice(name='True', value=1),
         Choice(name='False', value=0)],
@@ -114,47 +81,97 @@ class Multimedia(commands.Cog, MusicPlayer):
         put_front=[
         Choice(name='True', value=1),
         Choice(name='False', value=0)])
-    @MusicPlayerBase._is_user_join_checker()
-    @MusicPlayerBase._is_user_allowed()
-    async def _play(self, interaction: Interaction, query: str, source: TrackType = TrackType.YOUTUBE, autoplay: Choice[int] = 0, force_play: Choice[int] = 0, put_front: Choice[int] = 0) -> None:
+    @TrackPlayerDecorator.is_user_join_checker()
+    @TrackPlayerDecorator.is_user_allowed()
+    async def _search(self, interaction: Interaction, query: str, source: TrackType = TrackType.YOUTUBE,
+                      autoplay: Choice[int] = 0, force_play: Choice[int] = 0, put_front: Choice[int] = 0) -> None:
         await interaction.response.defer()
 
         autoplay = Choice(
             name="None", value=None) if autoplay == 0 else autoplay
-        force_play = Choice(
-            name="None", value=None) if force_play == 0 else force_play
-        put_front = Choice(
-            name="None", value=None) if put_front == 0 else put_front
+
+        view: View = None
+        convert_autoplay: bool = False
+        embed: Embed = Embed(color=YggUtil.convert_color(
+            YggConfig.COLOR['failed']))
+
+        if autoplay.value is None:
+            convert_autoplay = None
+
+        elif autoplay.value == 1:
+            convert_autoplay = True
+
+        try:
+            embed, view = await self.search(
+                query=query,
+                interaction=interaction,
+                source=source,
+                autoplay=convert_autoplay,
+                force_play=bool(force_play),
+                put_front=bool(put_front)
+            )
+        except IndexError:
+            embed.description = "❌ Track not found, check your keyword or source"
+
+        await YggUtil.send_response(interaction, embed=embed, view=view)
+
+    @command(name="play", description="To play a track from YouTube/Soundcloud/Spotify")
+    @describe(query="YouTube/Soundcloud/Spotify link or keyword",
+              source="Get track from different source(Default is YouTube, Spotify will automatically convert into YouTube/YouTubeMusic)",
+              autoplay="Autoplay recomendation from you've been played(Soundcloud not supported)",
+              force_play="Force to play the track(Previous queue still saved)",
+              put_front="Put track on front. Will play after current track end")
+    @choices(autoplay=[
+        Choice(name='True', value=1),
+        Choice(name='False', value=0)],
+        force_play=[
+        Choice(name='True', value=1),
+        Choice(name='False', value=0)],
+        put_front=[
+        Choice(name='True', value=1),
+        Choice(name='False', value=0)])
+    @TrackPlayerDecorator.is_user_join_checker()
+    @TrackPlayerDecorator.is_user_allowed()
+    async def _play(self, interaction: Interaction, query: str, source: TrackType = TrackType.YOUTUBE,
+                    autoplay: Choice[int] = 0, force_play: Choice[int] = 0, put_front: Choice[int] = 0) -> None:
+        await interaction.response.defer()
+
+        autoplay = Choice(
+            name="None", value=None) if autoplay == 0 else autoplay
 
         convert_autoplay: bool = False
-        convert_force_play: bool = False
-        convert_put_front: bool = False
         track: Playlist | Playable | SpotifyTrack = None
         is_playlist = is_queued = False
         embed: Embed = Embed(color=YggUtil.convert_color(
-            YggConfig.COLOR['failed']), description="❌ Track not found\nIf you're using link, check if it's supported or not")
+            YggConfig.COLOR['failed']),
+            description="❌ Track not found\nIf you're using link, check if it's supported or not"
+        )
 
-        if autoplay.value == None:
+        if autoplay.value is None:
             convert_autoplay = None
 
-        if autoplay.value == 1:
+        elif autoplay.value == 1:
             convert_autoplay = True
 
-        if force_play.value == 1:
-            convert_force_play = True
-
-        if put_front.value == 1:
-            convert_put_front = True
-
         try:
-            track, is_playlist, is_queued = await self.play(interaction,
-                                                            query=query,
-                                                            source=source,
-                                                            autoplay=convert_autoplay,
-                                                            force_play=convert_force_play,
-                                                            put_front=convert_put_front)
+            track, is_playlist, is_queued = await self.play(
+                interaction,
+                query=query,
+                source=source,
+                autoplay=convert_autoplay,
+                force_play=bool(force_play),
+                put_front=bool(put_front)
+            )
 
-            embed = await self._play_response(interaction.user, track=track, is_playlist=is_playlist, is_queued=is_queued, is_put_front=convert_put_front or convert_force_play, is_autoplay=convert_autoplay, raw_uri=query)
+            embed = await self._play_response(
+                interaction.user,
+                track=track,
+                is_playlist=is_playlist,
+                is_queued=is_queued,
+                is_put_front=bool(put_front) or bool(force_play),
+                is_autoplay=convert_autoplay,
+                uri=query if query.startswith('http') else track.uri
+            )
         except IndexError:
             pass
 
@@ -165,33 +182,26 @@ class Multimedia(commands.Cog, MusicPlayer):
     @choices(is_history=[
         Choice(name='True', value=1),
         Choice(name='False', value=0)])
-    @MusicPlayerBase._is_client_exist()
-    @MusicPlayerBase._is_user_allowed()
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
     async def _queue(self, interaction: Interaction, is_history: Choice[int] = 0) -> None:
         await interaction.response.defer(ephemeral=True)
 
-        is_history = Choice(
-            name="None", value=None) if is_history == 0 else is_history
-
-        convert_is_history: bool = False
         embed: Embed = Embed(description="📪 No tracks found", color=YggUtil.convert_color(
             YggConfig.COLOR['failed']))
         view: View = None
 
-        if is_history.value == 1:
-            convert_is_history = True
-
         try:
-            embed, view = await self.queue(interaction, is_history=convert_is_history)
+            embed, view = await self.queue(interaction, is_history=bool(is_history))
         except QueueEmpty:
             pass
 
         await YggUtil.send_response(interaction, embed=embed, view=view)
 
     @command(name="skip", description="Skip current track")
-    @MusicPlayerBase._is_client_exist()
-    @MusicPlayerBase._is_user_allowed()
-    @MusicPlayerBase._is_playing()
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
     async def _skip(self, interaction: Interaction) -> None:
         await interaction.response.defer()
         embed: Embed = Embed(
@@ -205,12 +215,12 @@ class Multimedia(commands.Cog, MusicPlayer):
         ])
 
     @command(name="jump", description="Jump on specific track(Put selected track into front)")
-    @MusicPlayerBase._is_client_exist()
-    @MusicPlayerBase._is_user_allowed()
-    @MusicPlayerBase._is_playing()
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
     async def _jump(self, interaction: Interaction) -> None:
         await interaction.response.defer()
-        view: View = View()
+        view: View = None
         embed: Embed = Embed(color=YggUtil.convert_color(
             YggConfig.COLOR['failed']))
 
@@ -219,31 +229,34 @@ class Multimedia(commands.Cog, MusicPlayer):
         except IndexError:
             embed.description = "📪 Queue is empty"
 
-        await YggUtil.send_response(interaction, embed=embed, view=view)
+        await create_task(YggUtil.send_response(interaction, embed=embed, view=view))
 
     @command(name="previous", description="Play previous track(All queue still saved)")
-    @MusicPlayerBase._is_client_exist()
-    @MusicPlayerBase._is_user_allowed()
-    @MusicPlayerBase._is_playing()
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
     async def _previous(self, interaction: Interaction) -> None:
         await interaction.response.defer()
+        was_allowed = was_on_loop = False
 
         embed: Embed = Embed(
             description="⏮️ Previous",
-            color=YggUtil.convert_color(YggConfig.COLOR['failed'])
+            color=YggUtil.convert_color(YggConfig.COLOR['success'])
         )
 
-        was_allowed: bool = await self.previous(interaction)
+        was_allowed, was_on_loop = await self.previous(interaction)
 
         if not was_allowed:
-            embed.description = "📪 History is empty"
+            embed.description = "📪 History is empty" if not was_on_loop else "🔁 Player is on loop"
+            embed.color = YggUtil.convert_color(
+                YggConfig.COLOR['failed'])
 
-        await YggUtil.send_response(interaction, embed=embed)
+        await create_task(YggUtil.send_response(interaction, embed=embed))
 
     @command(name="stop", description="Stop anything(This will reset player back to initial state)")
-    @MusicPlayerBase._is_client_exist()
-    @MusicPlayerBase._is_user_allowed()
-    @MusicPlayerBase._is_playing()
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
     async def _stop(self, interaction: Interaction) -> None:
         await interaction.response.defer()
 
@@ -258,9 +271,9 @@ class Multimedia(commands.Cog, MusicPlayer):
         ])
 
     @command(name="clear", description="Clear current queue(This will also disable Autoplay and any loop state)")
-    @MusicPlayerBase._is_client_exist()
-    @MusicPlayerBase._is_user_allowed()
-    @MusicPlayerBase._is_playing()
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
     async def _clear(self, interaction: Interaction) -> None:
         await interaction.response.defer()
 
@@ -273,9 +286,9 @@ class Multimedia(commands.Cog, MusicPlayer):
         await YggUtil.send_response(interaction, embed=embed)
 
     @command(name="shuffle", description="Shuffle current queue")
-    @MusicPlayerBase._is_client_exist()
-    @MusicPlayerBase._is_user_allowed()
-    @MusicPlayerBase._is_playing()
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
     async def _shuffle(self, interaction: Interaction) -> None:
         await interaction.response.defer()
 
@@ -291,53 +304,57 @@ class Multimedia(commands.Cog, MusicPlayer):
         ])
 
     @command(name="now_playing", description="Show current playing track")
-    @MusicPlayerBase._is_client_exist()
-    @MusicPlayerBase._is_user_allowed()
-    @MusicPlayerBase._is_playing()
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
     async def _now_playing(self, interaction: Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
-        player: Player = None
+        track: Playable = None
         time: int = int()
+        duration: str = str()
 
-        player, time = self.now_playing(interaction)
+        track, time, duration = self.now_playing(interaction)
+
         embed: Embed = Embed(
-            title=":notes: Now Playing",
-            description=f"""**[{player.current.title}]({player.current.uri}) - {self._parseSec(player.current.duration)}** 
+            title="🎶 Now Playing",
+            description=f"""**[{track.title}]({track.uri}) - {duration}** 
             \n** {str(timedelta(seconds=time)).split('.')[0]} left**""",
             color=YggUtil.convert_color(YggConfig.COLOR['general'])
         )
 
         await YggUtil.send_response(interaction, embed=embed)
 
-    @command(name="loop", description="Loop current track")
+    @command(name="lyrics", description="Get lyrics of the tracks(Fetched from MusixMatch)")
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
+    async def _lyrics(self, interaction: Interaction) -> None:
+        await interaction.response.defer(ephemeral=True)
+        embed: Embed = await self._lyrics_finder(interaction)
+
+        await YggUtil.send_response(interaction, embed=embed)
+
+    @command(name="loop", description="Loop current Track/Playlist")
     @describe(is_queue="Loop current player queue, instead current track(History are included)")
     @choices(is_queue=[
         Choice(name='True', value=1),
         Choice(name='False', value=0)])
-    @MusicPlayerBase._is_client_exist()
-    @MusicPlayerBase._is_user_allowed()
-    @MusicPlayerBase._is_playing()
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
     async def _loop(self, interaction: Interaction, is_queue: Choice[int] = 0) -> None:
         await interaction.response.defer()
-        loop = False
-
-        is_queue = Choice(
-            name="None", value=None) if is_queue == 0 else is_queue
-
-        convert_is_queue: bool = False
         embed: Embed = Embed(
             color=YggUtil.convert_color(YggConfig.COLOR['success'])
         )
 
-        if is_queue.value == 1:
-            convert_is_queue = True
+        loop: bool = self.loop(interaction, is_queue=bool(is_queue))
 
-        loop = self.loop(interaction, is_queue=convert_is_queue)
-
-        if not convert_is_queue:
-            embed.description = "✅ Loop Track" if loop else "✅ Unloop Track"
-        else:
+        if not bool(is_queue):
             embed.description = "✅ Loop Queue" if loop else "✅ Unloop Queue"
+
+        else:
+            embed.description = "✅ Loop Track" if loop else "✅ Unloop Track"
 
         await wait([
             create_task(YggUtil.send_response(interaction, embed=embed)),
@@ -345,9 +362,9 @@ class Multimedia(commands.Cog, MusicPlayer):
         ])
 
     @command(name="pause", description="Pause current track")
-    @MusicPlayerBase._is_client_exist()
-    @MusicPlayerBase._is_user_allowed()
-    @MusicPlayerBase._is_playing()
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
     async def _pause(self, interaction: Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
 
@@ -363,9 +380,9 @@ class Multimedia(commands.Cog, MusicPlayer):
         ])
 
     @command(name="resume", description="Resume current track")
-    @MusicPlayerBase._is_client_exist()
-    @MusicPlayerBase._is_user_allowed()
-    @MusicPlayerBase._is_playing()
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
     async def _resume(self, interaction: Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
 
