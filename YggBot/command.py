@@ -15,11 +15,16 @@ from discord.app_commands import (
 from discord.ui import View
 
 from wavelink import Playable, Playlist, QueueEmpty
-from wavelink.ext.spotify import SpotifyTrack
 
 from .util import YggUtil
-from .player import TrackPlayerDecorator, TrackPlayer, TrackType
+from .player import (
+    TrackPlayerDecorator,
+    TrackPlayer,
+    TrackType,
+    CustomSpotifyTrack
+)
 from config import YggConfig
+
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Multimedia(bot=bot))
@@ -140,7 +145,7 @@ class Multimedia(commands.Cog, TrackPlayer):
             name="None", value=None) if autoplay == 0 else autoplay
 
         convert_autoplay: bool = False
-        track: Playlist | Playable | SpotifyTrack = None
+        track: Playlist | Playable | CustomSpotifyTrack = None
         is_playlist = is_queued = False
         embed: Embed = Embed(color=YggUtil.convert_color(
             YggConfig.COLOR['failed']),

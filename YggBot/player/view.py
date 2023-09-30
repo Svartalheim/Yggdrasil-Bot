@@ -19,15 +19,15 @@ from discord.errors import NotFound
 from wavelink import (
     QueueEmpty,
     BaseQueue,
-    Playable
+    Playable,
+    YouTubeTrack
 )
-from wavelink.ext.spotify import SpotifyTrack
 
 from .interfaces import (
     CustomPlayer,
     TrackPlayerInterface,
     CustomYouTubeMusicTrack,
-    CustomYouTubeTrack,
+    CustomSpotifyTrack,
     TrackType
 )
 from ..util import YggUtil
@@ -47,7 +47,7 @@ class TrackView(View):
     @property
     def __is_previous_disabled(self) -> bool:
         if self.__player.queue.history.is_empty or (
-            self.__player.queue.history[-1] is self.__player.current and
+            self.__player.queue.history[-1] is self.__player._original and
             self.__player.queue.history.count <= 1
         ):
             return True
@@ -57,8 +57,13 @@ class TrackView(View):
     async def create_embed(self) -> Embed:
         interaction: Interaction = self.__track_control._get_interaction(
             self.__player.guild.id)
-        track: Playable | SpotifyTrack = self.__player.current
+        track: Playable | CustomSpotifyTrack = self.__player.current
         self.__update_button()
+        was_spotify: bool = isinstance(
+            self.__player._original, CustomSpotifyTrack)
+
+        if was_spotify:
+            track = self.__player._original
 
         embed = Embed(
             title="🎶 Now Playing",
@@ -67,23 +72,20 @@ class TrackView(View):
             timestamp=interaction.created_at
         )
 
-        if isinstance(track, CustomYouTubeMusicTrack | CustomYouTubeTrack):
-            image: str = await track.fetch_thumbnail()
-            embed.set_image(url=image)
-
-            if track.spotify_original is not None:
-                track = track.spotify_original
-
         track_type: TrackType = TrackType.what_type(track.uri)
         embed.set_author(name=str(track_type.name).replace(
             "_", " ").title(), icon_url=track_type.favicon())
 
-        if isinstance(track, SpotifyTrack):
-            embed.set_thumbnail(url=track.images[0])
+        if was_spotify:
+            embed.set_thumbnail(url=track.images)
             track_src: str = type(self.__player.current).__name__.replace(
                 "Custom", "").replace("Track", "")
             embed.description += f"\n\ntrack source from {track_src}\n [{self.__player.current.title}]({self.__player.current.uri})\
                   - {UtilTrackPlayer.parseSec(self.__player.current.duration)}"
+
+        if isinstance(self.__player.current, CustomYouTubeMusicTrack | YouTubeTrack):
+            image: str = await self.__player.current.fetch_thumbnail()
+            embed.set_image(url=image)
 
         embed.set_footer(
             text=f'Last control from {interaction.user.name}', icon_url=interaction.user.display_avatar)
@@ -207,7 +209,7 @@ class SelectView(View):
         control,
         intercation: Interaction,
         /,
-        data: list[Playable | SpotifyTrack],
+        data: list[Playable | CustomSpotifyTrack],
         is_jump_command: bool = False,
         autoplay: bool = None,
         force_play: bool = False,
@@ -215,11 +217,11 @@ class SelectView(View):
         *,
         timeout: float | None = 180
     ):
-        self.__data: list[Playable | SpotifyTrack] = list(data)
+        self.__data: list[Playable | CustomSpotifyTrack] = list(data)
         self.__track_control: TrackPlayerInterface = control
         self.__interaction: Interaction = intercation
 
-        self.__selected: Playable | SpotifyTrack = None
+        self.__selected: Playable | CustomSpotifyTrack = None
         self.__is_jump_command: bool = is_jump_command
         self.__autoplay: bool = autoplay
         self.__force_play: bool = force_play
@@ -253,7 +255,7 @@ class SelectView(View):
 
         return embed
 
-    def __get_current_page_data(self) -> list[Playable | SpotifyTrack]:
+    def __get_current_page_data(self) -> list[Playable | CustomSpotifyTrack]:
         start_index = 0
         end_index = self.SHOW_LIMIT
 
@@ -263,17 +265,15 @@ class SelectView(View):
 
         return self.__data[start_index:end_index]
 
-    def __pass_data_to_option(self, data: list[Playable | SpotifyTrack]) -> None:
+    def __pass_data_to_option(self, data: list[Playable | CustomSpotifyTrack]) -> None:
         if self._selector.options:
             self._selector.options.clear()
 
         index: int = (self.__current_page-1) * self.SHOW_LIMIT
 
         for track in data:
-            author: str = track.author if not isinstance(
-                track, SpotifyTrack) else track.artists
             self._selector.append_option(SelectOption(
-                label=YggUtil.truncate_string(track.title, max=100), description=f"{YggUtil.truncate_string(author, max=50)}\
+                label=YggUtil.truncate_string(track.title, max=100), description=f"{YggUtil.truncate_string(track.author, max=50)}\
                       - {UtilTrackPlayer.parseSec(track.duration)}", emoji=choice(self.__rand_emoji), value=str(index)))
             index += 1
 
@@ -401,7 +401,7 @@ class QueueView(View):
     SHOW_LIMIT: int = 10
 
     def __init__(self, queue: chain | BaseQueue, interaction: Interaction, is_history: bool = False, *, timeout: float | None = 180):
-        self.__data: list[Playable | SpotifyTrack] = list(queue)
+        self.__data: list[Playable | CustomSpotifyTrack] = list(queue)
 
         self.__current_page: int = 1
         self.__is_history: bool = is_history
@@ -430,7 +430,7 @@ class QueueView(View):
 
         return embed
 
-    def __get_current_page_data(self) -> list[Playable | SpotifyTrack]:
+    def __get_current_page_data(self) -> list[Playable | CustomSpotifyTrack]:
         start_index = 0
         end_index = self.SHOW_LIMIT
 

@@ -1,4 +1,5 @@
 from json import loads
+from re import sub
 
 from pykakasi import kakasi
 
@@ -8,7 +9,6 @@ from yarl import URL
 
 from wavelink import Playable, Node, NodePool
 from wavelink.ext.spotify import (
-    SpotifyTrack,
     SpotifyClient,
     SpotifyRequestError,
     SpotifyDecodePayload,
@@ -16,36 +16,14 @@ from wavelink.ext.spotify import (
     BASEURL
 )
 
+from .interfaces import CustomSpotifyTrack
 from config import YggConfig
 
 
 class UtilTrackPlayer:
 
     @staticmethod
-    async def search_spotify_raw(session: ClientSession, /, query: str, limit: int) -> list[SpotifyTrack]:
-        node: Node = NodePool.get_connected_node()
-        data: dict = dict()
-
-        sp_client: SpotifyClient = node._spotify
-        if sp_client.is_token_expired():
-            await sp_client._get_bearer_token()
-
-        uri = "https://api.spotify.com/v1/search?q={q}&type={type}&limit={limit}"
-        uri = uri.format(q=query, type="track", limit=limit)
-
-        async with session.get(uri, headers=sp_client.bearer_headers) as resp:
-            if resp.status == 400:
-                return None
-            elif resp.status != 200:
-                raise SpotifyRequestError(resp.status, resp.reason)
-
-            data = await resp.json()
-            data = data['tracks']['items']
-
-        return [SpotifyTrack(data=x) for x in data]
-
-    @staticmethod
-    async def get_raw_spotify_uri(session: ClientSession, uri_ori: str) -> dict:
+    async def get_raw_spotify_playlist(session: ClientSession, uri_ori: str) -> dict:
         node: Node = NodePool.get_connected_node()
         decoded: SpotifyDecodePayload = decode_url(url=uri_ori)
         id: str = decoded.id
@@ -93,23 +71,6 @@ class UtilTrackPlayer:
         else:
             return f'{m:02d}m {s:02d}s'
 
-    @staticmethod
-    def spotify_patcher(child: SpotifyTrack) -> SpotifyTrack:
-
-        def __spotify_link_fixed(uri: str) -> str:
-            openable_link: str = "https://open.spotify.com/{track_type}/{id}"
-            uri_split: list[str] = uri.split(":")
-            id: str = uri_split[2]
-            track_type: str = uri_split[1]
-
-            return openable_link.format(track_type=track_type, id=id)
-
-        if not "//" in child.uri:
-            child.uri = __spotify_link_fixed(child.uri)
-            child.artists: str = ', '.join(child.artists).strip()
-
-        return child
-
 
 class MusixMatchAPI:
 
@@ -137,8 +98,8 @@ class MusixMatchAPI:
 
     API_URL: str = "https://api.musixmatch.com/ws/1.1/"
 
-    def __init__(self, track: Playable | SpotifyTrack, session: ClientSession) -> None:
-        self.__track: Playable | SpotifyTrack = track
+    def __init__(self, track: Playable | CustomSpotifyTrack, session: ClientSession) -> None:
+        self.__track: Playable | CustomSpotifyTrack = track
         self.__session: ClientSession = session
 
         self.__params: dict = {
@@ -152,21 +113,20 @@ class MusixMatchAPI:
     def __was_contains_japanese(self, text: str) -> bool:
         for char in text:
             if ('\u4e00' <= char <= '\u9fff'  # Kanji
-                    or '\u3040' <= char <= '\u309f'  # Hiragana
-                    or '\u30a0' <= char <= '\u30ff'  # Katakana
-                    or '\u31f0' <= char <= '\u31ff'  # Katakana Phonetic Extensions
-                    or '\uff66' <= char <= '\uff9f'  # Halfwidth Katakana
-                ):
+                        or '\u3040' <= char <= '\u309f'  # Hiragana
+                        or '\u30a0' <= char <= '\u30ff'  # Katakana
+                        or '\u31f0' <= char <= '\u31ff'  # Katakana Phonetic Extensions
+                        or '\uff66' <= char <= '\uff9f'  # Halfwidth Katakana
+                    ):
                 return True
         return False
-
+    
     async def __fulfill_with_spotify(self) -> None:
-        spot: list[SpotifyTrack] = await UtilTrackPlayer.search_spotify_raw(
-            self.__session,
+        spot: list[CustomSpotifyTrack] = await CustomSpotifyTrack.search(
             query=self.__track.title,
             limit=1
         )
-        self.__track = UtilTrackPlayer.spotify_patcher(spot[0])
+        self.__track = spot[0]
 
     async def __requester(self, path: str, /, params: dict) -> dict:
         data: dict = None
@@ -190,7 +150,7 @@ class MusixMatchAPI:
         path: str = 'track.search'
         params: dict = None
 
-        if not isinstance(self.__track, SpotifyTrack):
+        if not isinstance(self.__track, CustomSpotifyTrack):
             await self.__fulfill_with_spotify()
 
         if self.__track.isrc is not None:
@@ -200,7 +160,7 @@ class MusixMatchAPI:
         else:
             params = {
                 'q_track': self.__track.title,
-                'q_artist': self.__track.artists
+                'q_artist': self.__track.artists[0]
             }
 
         data: dict = await self.__requester(path, params=params)
@@ -216,7 +176,7 @@ class MusixMatchAPI:
         for x in data:
             x = x['track']
 
-            if str(self.__track.artists).casefold() in str(x['artist_name']).casefold():
+            if str(self.__track.artists[0]).casefold() in str(x['artist_name']).casefold():
                 return str(x['track_id'])
 
         return str(data[0]['track']['track_id'])
@@ -236,10 +196,11 @@ class MusixMatchAPI:
         for i in converted_lyrics:
 
             if self.__was_contains_japanese(text=i):
-                conv: str = next((x['hepburn'] for x in kakasi().convert(i)), i) + " ".replace("\n", "")
+                conv: str = next(
+                    (x['hepburn'] for x in kakasi().convert(i)), i) + " ".replace("\n", "")
                 converted_lyrics = converted_lyrics.replace(i, conv)
 
-        converted_lyrics += f"\n(only 30% of the lyrics are returned)\n**{self.__track.title} - {self.__track.artists}**"
+        converted_lyrics = sub(r'\(\d+\)', '', converted_lyrics)
+        converted_lyrics += f"\n(only 30% of the lyrics are returned)\n**{self.__track.title} - {self.__track.author}**"
 
         return converted_lyrics
-

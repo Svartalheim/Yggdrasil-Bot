@@ -5,9 +5,8 @@ from discord import Interaction, Embed, VoiceChannel
 from discord.ui import View
 
 from wavelink import Playable, Playlist
-from wavelink.ext.spotify import SpotifyTrack
 
-from .interfaces import CustomPlayer, TrackType
+from .interfaces import CustomPlayer, TrackType, CustomSpotifyTrack
 from .util_player import UtilTrackPlayer
 from .base_player import TrackPlayerBase
 from .view import QueueView, SelectView
@@ -31,17 +30,17 @@ class TrackPlayer(TrackPlayerBase):
         if query.startswith("http"):
             source = TrackType.what_type(query)
 
-        tracks: Playable | Playlist | SpotifyTrack | list[SpotifyTrack] = await self._custom_wavelink_player(query=query, track_type=source, is_search=True)
+        tracks: Playable | Playlist | CustomSpotifyTrack | list[CustomSpotifyTrack] = await self._custom_wavelink_player(query=query, track_type=source, is_search=True)
         view: SelectView = SelectView(self, interaction, data=tracks if not isinstance(
             tracks, Playlist) else tracks.tracks, autoplay=autoplay, force_play=force_play, put_front=put_front)
         embed = view.get_embed
 
         return (embed, view)
 
-    async def play(self, interaction: Interaction, /, query: str | Playable | SpotifyTrack, source: TrackType = TrackType.YOUTUBE,
-                   autoplay: bool = None, force_play: bool = False, put_front: bool = False) -> Tuple[Playable | Playlist | SpotifyTrack, bool, bool]:
+    async def play(self, interaction: Interaction, /, query: str | Playable | CustomSpotifyTrack, source: TrackType = TrackType.YOUTUBE,
+                   autoplay: bool = None, force_play: bool = False, put_front: bool = False) -> Tuple[Playable | Playlist | CustomSpotifyTrack, bool, bool]:
         is_playlist = is_queued = False
-        was_playable: bool = isinstance(query, Playable | SpotifyTrack)
+        was_playable: bool = isinstance(query, Playable | CustomSpotifyTrack)
         player: CustomPlayer = None
 
         if not interaction.guild.voice_client:
@@ -54,7 +53,7 @@ class TrackPlayer(TrackPlayerBase):
             uri=query) if not was_playable else None) or source
 
         if not was_playable:
-            tracks: Playable | Playlist | SpotifyTrack | list[SpotifyTrack] = await self._custom_wavelink_player(query=query, track_type=track_type)
+            tracks: Playable | Playlist | CustomSpotifyTrack | list[CustomSpotifyTrack] = await self._custom_wavelink_player(query=query, track_type=track_type)
 
         else:
             tracks = query
@@ -85,7 +84,7 @@ class TrackPlayer(TrackPlayerBase):
                 await player.seek(player.current.length * 1000)
 
             elif not player.is_playing():
-                trck: Playable | SpotifyTrack = await player.queue.get_wait()
+                trck: Playable | CustomSpotifyTrack = await player.queue.get_wait()
                 await player.play(trck)
 
             is_playlist = True
@@ -122,7 +121,7 @@ class TrackPlayer(TrackPlayerBase):
         player: CustomPlayer = interaction.user.guild.voice_client
 
         if index is not None:
-            track: Playable | SpotifyTrack = None
+            track: Playable | CustomSpotifyTrack = None
 
             if index < player.queue.count:
                 track = player.queue[index]
@@ -157,7 +156,7 @@ class TrackPlayer(TrackPlayerBase):
         player: CustomPlayer = interaction.user.guild.voice_client
 
         was_on_loop: bool = player.queue.loop
-        if not player.queue.history.is_empty and player.queue.history.count >= 1 and player.queue.history[-1] is player.current:
+        if not player.queue.history.is_empty and player.queue.history.count >= 1 and player.queue.history[-1] is player._original:
             player.queue.put_at_front(player.queue.history.pop())
             player.queue.put_at_front(player.queue.history.pop())
             await player.seek(player.current.length * 1000)
