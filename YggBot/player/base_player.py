@@ -119,9 +119,9 @@ class TrackPlayerDecorator:
                     emoji="🛑",
                     ephemeral=True,
                 )
-                isTrue = False
+                return False
 
-            return isTrue
+            return True
 
         return check(decorator)
 
