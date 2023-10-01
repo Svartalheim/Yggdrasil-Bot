@@ -333,7 +333,7 @@ class SelectView(View):
         return isTrue
 
     async def on_timeout(self) -> None:
-        if self.__selected:
+        if not self.__selected:
             await self.__interaction.delete_original_response()
         return await super().on_timeout()
 

@@ -23,14 +23,15 @@ from config import YggConfig
 class UtilTrackPlayer:
 
     @staticmethod
-    async def get_raw_spotify_playlist(session: ClientSession, uri_ori: str) -> dict:
+    async def get_raw_spotify_playlist(uri: str) -> dict:
         node: Node = NodePool.get_connected_node()
-        decoded: SpotifyDecodePayload = decode_url(url=uri_ori)
+        decoded: SpotifyDecodePayload = decode_url(url=uri)
         id: str = decoded.id
         track_type: str = decoded.type.name
         data: dict = dict()
 
         sp_client: SpotifyClient = node._spotify
+        session: ClientSession = sp_client.session
         if sp_client.is_token_expired():
             await sp_client._get_bearer_token()
 
@@ -55,8 +56,7 @@ class UtilTrackPlayer:
         index: int = None
         if url.query.get('start_radio'):
             index = int(url.query.get('start_radio'))
-
-        if url.query.get('index'):
+        elif url.query.get('index'):
             index = int(url.query.get('index'))
 
         return index
@@ -113,14 +113,14 @@ class MusixMatchAPI:
     def __was_contains_japanese(self, text: str) -> bool:
         for char in text:
             if ('\u4e00' <= char <= '\u9fff'  # Kanji
-                        or '\u3040' <= char <= '\u309f'  # Hiragana
-                        or '\u30a0' <= char <= '\u30ff'  # Katakana
-                        or '\u31f0' <= char <= '\u31ff'  # Katakana Phonetic Extensions
-                        or '\uff66' <= char <= '\uff9f'  # Halfwidth Katakana
+                    or '\u3040' <= char <= '\u309f'  # Hiragana
+                    or '\u30a0' <= char <= '\u30ff'  # Katakana
+                    or '\u31f0' <= char <= '\u31ff'  # Katakana Phonetic Extensions
+                    or '\uff66' <= char <= '\uff9f'  # Halfwidth Katakana
                     ):
                 return True
         return False
-    
+
     async def __fulfill_with_spotify(self) -> None:
         spot: list[CustomSpotifyTrack] = await CustomSpotifyTrack.search(
             query=self.__track.title,
@@ -133,16 +133,15 @@ class MusixMatchAPI:
         self.__params.update(params)
 
         async with self.__session.get(url=self.API_URL+path, params=self.__params) as resp:
-            if resp.status == 200:
-                data = await resp.text(encoding='utf-8')
-                data = loads(data)
-
-                if data['message']['header']['status_code'] != 200:
-                    raise self.StatusCodeHandling(
-                        data['message']['header']['status_code'])
-
-            else:
+            if resp.status != 200:
                 raise self.StatusCodeHandling(resp.status)
+
+            data = await resp.text(encoding='utf-8')
+            data = loads(data)
+
+            if data['message']['header']['status_code'] != 200:
+                raise self.StatusCodeHandling(
+                    data['message']['header']['status_code'])
 
         return data['message']['body']
 
@@ -165,21 +164,15 @@ class MusixMatchAPI:
 
         data: dict = await self.__requester(path, params=params)
         if not data['track_list']:
+            params['q'] = params['q_track']
+            params.pop('q_track')
             params.pop('q_artist')
 
             data = await self.__requester(path, params=params)
             if not data['track_list']:
                 raise self.StatusCodeHandling(404)
 
-        data = data['track_list'][:5]
-
-        for x in data:
-            x = x['track']
-
-            if str(self.__track.artists[0]).casefold() in str(x['artist_name']).casefold():
-                return str(x['track_id'])
-
-        return str(data[0]['track']['track_id'])
+        return int(data['track_list'][0]['track']['track_id'])
 
     async def get_lyrics(self) -> str:
         track_id: int = await self.__get_track_id()
