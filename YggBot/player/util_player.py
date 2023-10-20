@@ -52,12 +52,13 @@ class UtilTrackPlayer:
         return data
 
     @staticmethod
-    def extract_index_youtube(url: URL) -> int:
+    def extract_index_youtube(q: str) -> int:
         index: int = None
-        if url.query.get('start_radio'):
-            index = int(url.query.get('start_radio'))
-        elif url.query.get('index'):
-            index = int(url.query.get('index'))
+
+        if q.startswith('http'):
+            url = URL(q)
+            index = int(url.query.get('start_radio')) or int(
+                url.query.get('index'))
 
         return index
 

@@ -1,8 +1,6 @@
 from datetime import timedelta, datetime
 from asyncio import gather, create_task, wait
 
-from yarl import URL
-
 from discord import (
     Interaction,
     Embed,
@@ -194,10 +192,10 @@ class TrackPlayerBase:
         """Will return either List of tracks or Single Tracks"""
         tracks: Playable | Playlist | CustomSpotifyTrack | list[CustomSpotifyTrack] = None
         is_playlist: bool = track_type.is_playlist(query)
+        was_youtube: bool = track_type in (TrackType.YOUTUBE, TrackType.YOUTUBE_MUSIC)
         search_limit: int = 30
-        url: URL = None
 
-        if track_type in (TrackType.YOUTUBE, TrackType.YOUTUBE_MUSIC):
+        if was_youtube:
             if is_playlist:
                 tracks: YouTubePlaylist = await YouTubePlaylist.search(query)
 
@@ -229,8 +227,8 @@ class TrackPlayerBase:
         elif not is_playlist:
             tracks = tracks[0]
 
-        elif is_playlist:
-            index: int = UtilTrackPlayer.extract_index_youtube(url=url)
+        elif is_playlist and was_youtube:
+            index: int = UtilTrackPlayer.extract_index_youtube(q=query)
             tracks = tracks.tracks[index-1] if index else tracks
 
         return tracks
