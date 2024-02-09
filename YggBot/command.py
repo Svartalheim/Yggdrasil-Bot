@@ -447,13 +447,13 @@ class Multimedia(commands.Cog, TrackPlayer):
             ]
         )
 
-    # async def cog_app_command_error(
-    #     self, interaction: Interaction, error: AppCommandError
-    # ) -> None:
-    #     if not isinstance(error, CheckFailure):
-    #         print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(Exception).__name__, Exception)
-    #         await YggUtil.send_response(
-    #             interaction, message=f"Unknown error, {Exception(error)}", emoji="❓"
-    #         )
+    async def cog_app_command_error(
+        self, interaction: Interaction, error: AppCommandError
+    ) -> None:
+        if not isinstance(error, CheckFailure):
+            print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(Exception).__name__, Exception)
+            await YggUtil.send_response(
+                interaction, message=f"Unknown error, {Exception(error)}", emoji="❓"
+            )
 
-    #     return await super().cog_app_command_error(interaction, error)
+        return await super().cog_app_command_error(interaction, error)
