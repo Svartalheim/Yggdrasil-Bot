@@ -220,7 +220,6 @@ class TrackPlayerBase:
             tracks: list[CustomSpotifyTrack] = list()
             tracks = await CustomSpotifyTrack.search(query)
 
-
         if is_search:
             tracks = tracks[0:search_limit]
 
@@ -229,7 +228,7 @@ class TrackPlayerBase:
 
         elif is_playlist and was_youtube:
             index: int = UtilTrackPlayer.extract_index_youtube(q=query)
-            tracks = tracks.tracks[index-1] if index else tracks
+            tracks = tracks.tracks[index - 1] if isinstance(index, int) else tracks
 
         return tracks
 

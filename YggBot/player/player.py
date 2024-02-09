@@ -51,7 +51,7 @@ class TrackPlayer(TrackPlayerBase):
 
         track_type: TrackType = (TrackType.what_type(
             uri=query) if not was_playable else None) or source
-
+        
         if not was_playable:
             tracks: Playable | Playlist | CustomSpotifyTrack | list[CustomSpotifyTrack] = await self._custom_wavelink_player(query=query, track_type=track_type)
 

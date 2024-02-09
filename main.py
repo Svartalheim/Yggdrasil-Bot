@@ -2,14 +2,7 @@ from random import choice
 
 from aiohttp import ClientSession
 
-from discord import (
-    Intents,
-    Embed,
-    Interaction,
-    Activity,
-    ActivityType,
-    Status
-)
+from discord import Intents, Embed, Interaction, Activity, ActivityType, Status
 from discord.app_commands import guild_only
 from discord.ext import commands, tasks
 
@@ -48,7 +41,7 @@ class YggTask:
                 activity=Activity(
                     type=ActivityType.playing,
                     name=f"with {member_count} Disciple",
-                )
+                ),
             )
 
         async def __b() -> None:
@@ -57,17 +50,17 @@ class YggTask:
                 activity=Activity(
                     type=ActivityType.listening,
                     name=f"you",
-                )
+                ),
             )
 
         async def __c() -> None:
-            competing_list = ["Hell Like Heaven", "\"Flower on a High Peak\""]
+            competing_list = ["Hell Like Heaven", '"Flower on a High Peak"']
             await self.change_presence(
                 status=Status.idle,
                 activity=Activity(
                     type=ActivityType.competing,
                     name=choice(competing_list),
-                )
+                ),
             )
 
         async def __d() -> None:
@@ -77,7 +70,7 @@ class YggTask:
                 activity=Activity(
                     type=ActivityType.watching,
                     name=choice(watching_list),
-                )
+                ),
             )
 
         async def __e() -> None:
@@ -86,7 +79,7 @@ class YggTask:
                 activity=Activity(
                     type=ActivityType.listening,
                     name="Ignorance is Bliss",
-                )
+                ),
             )
 
         await choice([__a, __b, __c, __d, __e])()
@@ -105,8 +98,7 @@ class YggBase(commands.Bot):
             embed.add_field(
                 name=f"**/{command.name}**", value=command.description, inline=True
             )
-        embed.set_author(name=self.user.name,
-                         icon_url=self.user.display_avatar)
+        embed.set_author(name=self.user.name, icon_url=self.user.display_avatar)
         embed.set_footer(
             text=f" © {bot_name} • Still under develop, if there is something wrong contact @svartalheim"
         )
@@ -152,8 +144,7 @@ bot: commands.Bot = YggClient()
 @bot.tree.command(name="help", description="Help user to find command")
 @guild_only()
 async def _help(interaction: Interaction) -> None:
-    YggUtil.simple_log(
-        f"{interaction.guild.me.name} AKA {interaction.guild.me.nick}")
+    YggUtil.simple_log(f"{interaction.guild.me.name} AKA {interaction.guild.me.nick}")
     bot_name = ""
     if interaction.guild.me.nick is None:
         bot_name = interaction.guild.me.name
@@ -165,8 +156,9 @@ async def _help(interaction: Interaction) -> None:
             interaction.guild.name,
             bot_name,
         ),
-
     )
 
+
+print(YggConfig.TOKEN, "ygtoken")
 
 bot.run(token=YggConfig.TOKEN.strip())

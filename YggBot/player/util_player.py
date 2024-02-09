@@ -57,8 +57,24 @@ class UtilTrackPlayer:
 
         if q.startswith('http'):
             url = URL(q)
-            index = int(url.query.get('start_radio')) or int(
-                url.query.get('index'))
+            print('Parsing URL:', url)  # Debug print
+            try:
+                start_radio_value = url.query.get("start_radio")
+                index_value = url.query.get("index")
+                print('start_radio value:', start_radio_value)  # Debug print
+                print('index value:', index_value)  # Debug print
+                
+                # Try converting the parameter values to integers
+                if start_radio_value:
+                    index = int(start_radio_value)
+                elif index_value:
+                    index = int(index_value)
+                else:
+                    raise ValueError("Neither 'start_radio' nor 'index' parameter found.")
+                
+                print('Index:', index)  # Debug print
+            except Exception as e:
+                print("Error:", e)
 
         return index
 
