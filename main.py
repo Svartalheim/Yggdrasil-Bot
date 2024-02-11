@@ -1,4 +1,5 @@
 from random import choice
+from datetime import timedelta
 
 from aiohttp import ClientSession
 
@@ -6,8 +7,7 @@ from discord import Intents, Embed, Interaction, Activity, ActivityType, Status
 from discord.app_commands import guild_only
 from discord.ext import commands, tasks
 
-from wavelink import Node, NodePool
-from wavelink.ext.spotify import SpotifyClient
+from wavelink import Node, Pool
 
 from YggBot import YggUtil
 from config import YggConfig
@@ -22,13 +22,12 @@ class YggTask:
     @staticmethod
     async def _connect_nodes(bot: commands.Bot) -> None:
         await bot.wait_until_ready()
-        sc: SpotifyClient = SpotifyClient(
-            client_id=YggConfig.SPOTIFY_CLIENT, client_secret=YggConfig.SPOTIFY_SECRET
-        )
-        node: Node = Node(
-            uri=YggConfig.LAVALINK_SERVER, password=YggConfig.LAVALINK_PASSWORD
-        )
-        await NodePool.connect(client=bot, nodes=[node], spotify=sc)
+        inactive_timeout: int = timedelta(minutes=30).total_seconds()
+
+        nodes: list[Node] = [Node(uri=YggConfig.LAVALINK_SERVER,
+                                  password=YggConfig.LAVALINK_PASSWORD, inactive_player_timeout=inactive_timeout)]
+
+        await Pool.connect(nodes=nodes, client=bot, cache_capacity=20)
 
     @tasks.loop(seconds=60)
     async def _change_activity(self: commands.Bot) -> None:
@@ -91,14 +90,15 @@ class YggBase(commands.Bot):
         embed: Embed = Embed(
             title=f"Commands for {server_name}",
             description=desc,
-            color=YggUtil.convert_color(YggConfig.COLOR["general"]),
+            color=YggUtil.convert_color(YggConfig.Color.GENERAL),
         )
 
         for command in await self.tree.fetch_commands():
             embed.add_field(
                 name=f"**/{command.name}**", value=command.description, inline=True
             )
-        embed.set_author(name=self.user.name, icon_url=self.user.display_avatar)
+        embed.set_author(name=self.user.name,
+                         icon_url=self.user.display_avatar)
         embed.set_footer(
             text=f" © {bot_name} • Still under develop, if there is something wrong contact @svartalheim"
         )
@@ -144,7 +144,8 @@ bot: commands.Bot = YggClient()
 @bot.tree.command(name="help", description="Help user to find command")
 @guild_only()
 async def _help(interaction: Interaction) -> None:
-    YggUtil.simple_log(f"{interaction.guild.me.name} AKA {interaction.guild.me.nick}")
+    YggUtil.simple_log(
+        f"{interaction.guild.me.name} AKA {interaction.guild.me.nick}")
     bot_name = ""
     if interaction.guild.me.nick is None:
         bot_name = interaction.guild.me.name

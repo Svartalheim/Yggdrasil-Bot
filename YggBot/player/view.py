@@ -16,18 +16,20 @@ from discord.ui import (
 )
 from discord.errors import NotFound
 
+from aiohttp import ClientSession
+
 from wavelink import (
     QueueEmpty,
-    BaseQueue,
+    Queue,
     Playable,
-    YouTubeTrack
+    QueueMode
 )
+
+from LyricsFindScrapper import Search as SearchLF, Track, SongData, Translation, LFException
 
 from .interfaces import (
     CustomPlayer,
     TrackPlayerInterface,
-    CustomYouTubeMusicTrack,
-    CustomSpotifyTrack,
     TrackType
 )
 from ..util import YggUtil
@@ -36,11 +38,13 @@ from config import YggConfig
 
 
 class TrackView(View):
-    def __init__(self, control, /, player: CustomPlayer, *, timeout: float | None = None):
+
+    def __init__(self, control: TrackPlayerInterface, player: CustomPlayer, /, *, timeout: float | None = None):
         self.__track_control: TrackPlayerInterface = control
         self.__player: CustomPlayer = player
-        self.__is_playing: bool = self.__player.is_playing()
-        self.__is_loop: bool = self.__player.queue.loop
+        self.__is_playing: bool = not self.__player.paused
+        self.__is_loop: bool = True if self.__player.queue.mode is QueueMode.loop else False
+        self.__is_loop_queue: bool = True if self.__player.queue.mode is QueueMode.loop_all else False
 
         super().__init__(timeout=timeout)
 
@@ -54,21 +58,16 @@ class TrackView(View):
 
         return False
 
-    async def create_embed(self) -> Embed:
-        interaction: Interaction = self.__track_control._get_interaction(
-            self.__player.guild.id)
-        track: Playable | CustomSpotifyTrack = self.__player.current
+    @property
+    def get_embed(self) -> Embed:
+        interaction: Interaction = self.__player.interaction
+        track: Playable = self.__player._original
         self.__update_button()
-        was_spotify: bool = isinstance(
-            self.__player._original, CustomSpotifyTrack)
-
-        if was_spotify:
-            track = self.__player._original
 
         embed = Embed(
             title="🎶 Now Playing",
-            color=YggUtil.convert_color(YggConfig.COLOR['general']),
-            description=f"**[{track.title}]({track.uri})** - **{UtilTrackPlayer.parseSec(track.duration)}**",
+            color=YggUtil.convert_color(YggConfig.Color.GENERAL),
+            description=f"**[{track.title} | {track.author}]({track.uri})** - **{UtilTrackPlayer.parse_sec(track.length)}**",
             timestamp=interaction.created_at
         )
 
@@ -76,17 +75,14 @@ class TrackView(View):
         embed.set_author(name=str(track_type.name).replace(
             "_", " ").title(), icon_url=track_type.favicon())
 
-        if was_spotify:
-            embed.set_thumbnail(url=track.images)
-            track_src: str = type(self.__player.current).__name__.replace(
-                "Custom", "").replace("Track", "")
-            embed.description += f"\n\ntrack source from {track_src}\n [{self.__player.current.title}]({self.__player.current.uri})\
-                  - {UtilTrackPlayer.parseSec(self.__player.current.duration)}"
+        if self.__is_loop_queue:
+            embed.add_field(
+                name="Loop Queue",
+                value="Active"
+            )
 
-        if isinstance(self.__player.current, CustomYouTubeMusicTrack | YouTubeTrack):
-            image: str = await self.__player.current.fetch_thumbnail()
-            embed.set_image(url=image)
-
+        embed.set_thumbnail(url=track.artist.artwork)
+        embed.set_image(url=self.__player.current.artwork)
         embed.set_footer(
             text=f'Last control from {interaction.user.name}', icon_url=interaction.user.display_avatar)
 
@@ -96,7 +92,7 @@ class TrackView(View):
         self.__update_button()
 
         try:
-            embed: Embed = await self.create_embed()
+            embed: Embed = self.get_embed
             await interaction.edit_original_response(view=self, embed=embed)
         except (NotFound, AttributeError):
             pass
@@ -105,31 +101,16 @@ class TrackView(View):
         isTrue = True
         # Check whether user is joined
         if not interaction.user.voice:
-            await YggUtil.send_response(
-                interaction,
-                message="Can't do that. \nPlease Join Voice channel first!!",
-                emoji="❌",
-                ephemeral=True,
-            )
+            await YggUtil.send_response(interaction, message="Can't do that. \nPlease Join Voice channel first!!", emoji="❌", ephemeral=True)
             isTrue = False
 
         # Check wheter user is allowed
-        elif (
-            interaction.guild.voice_client
-            and interaction.guild.voice_client.channel != interaction.user.voice.channel
-        ):
-            await YggUtil.send_response(
-                interaction,
-                message="Can't do that. \nPlease join the same Voice Channel with bot!!",
-                emoji="🛑",
-                ephemeral=True,
-            )
+        elif interaction.guild.voice_client and interaction.guild.voice_client.channel != interaction.user.voice.channel:
+            await YggUtil.send_response(interaction, message="Can't do that. \nPlease join the same Voice Channel with bot!!", emoji="🛑", ephemeral=True)
             isTrue = False
 
         if isTrue:
-            self.__track_control._record_timestamp(
-                guild_id=interaction.guild_id, interaction=interaction
-            )
+            self.__player.interaction = interaction
 
         return isTrue
 
@@ -154,12 +135,10 @@ class TrackView(View):
 
     @button(label="Previous", emoji="⏮️", style=ButtonStyle.secondary)
     async def _previous(self, interaction: Interaction, _) -> None:
-        await wait(
-            [
-                create_task(interaction.response.defer()),
-                create_task(self.__track_control.previous(interaction)),
-            ]
-        )
+        await wait([
+            create_task(interaction.response.defer()),
+            create_task(self.__track_control.previous(interaction))
+        ])
 
     @button(label="Pause", emoji="⏸️", style=ButtonStyle.blurple)
     async def _pause(self, interaction: Interaction, _) -> None:
@@ -175,21 +154,17 @@ class TrackView(View):
 
     @button(label="Stop", emoji="⏹️", style=ButtonStyle.red)
     async def _stop(self, interaction: Interaction, _) -> None:
-        await wait(
-            [
-                create_task(interaction.response.defer()),
-                create_task(self.__track_control.stop(interaction)),
-            ]
-        )
+        await wait([
+            create_task(interaction.response.defer()),
+            create_task(self.__track_control.stop(interaction))
+        ])
 
     @button(label="Next", emoji="⏭️", style=ButtonStyle.secondary)
     async def _next(self, interaction: Interaction, _) -> None:
-        await wait(
-            [
-                create_task(interaction.response.defer()),
-                create_task(self.__track_control.skip(interaction)),
-            ]
-        )
+        await wait([
+            create_task(interaction.response.defer()),
+            create_task(self.__track_control.skip(interaction))
+        ])
 
     @button(label="Loop", emoji="🔁", style=ButtonStyle.green)
     async def _loop(self, interaction: Interaction, _) -> None:
@@ -200,28 +175,128 @@ class TrackView(View):
         await self.__update_message(interaction)
 
 
-class SelectView(View):
+class SelectViewSubtitle(View):
 
-    SHOW_LIMIT = 25
+    def __init__(self, session: ClientSession, playable: Playable, interaction: Interaction, /, *, timeout: float | None = 180):
+        self.__lf_client: SearchLF = SearchLF(session=session)
+        self.__interaction: Interaction = interaction
+        self.__playable: Playable = playable
 
-    def __init__(
-        self,
-        control,
-        intercation: Interaction,
-        /,
-        data: list[Playable | CustomSpotifyTrack],
-        is_jump_command: bool = False,
-        autoplay: bool = None,
-        force_play: bool = False,
-        put_front: bool = False,
-        *,
-        timeout: float | None = 180
-    ):
-        self.__data: list[Playable | CustomSpotifyTrack] = list(data)
+        timeout = playable.length
+
+        self.__target_lang: str = None
+        self.__available_lang: list[str] = []
+
+        self.__track: Track = None
+        self.__lyrics: str = None
+
+        self.__rand_emoji: list[str] = ['🈴', '🅰', '🈵', '🈹', '🈲']
+
+        super().__init__(timeout=timeout)
+
+    async def create_embed(self) -> Embed:
+        embed: Embed = Embed(color=YggUtil.convert_color(
+            YggConfig.Color.FAILED))
+        embed.title = f"🎼 Lyrics of - {self.__playable.title}"
+        embed.set_author(
+            name="LyricFind",
+            icon_url="https://www.google.com/s2/favicons?domain={domain}&sz=256".format(
+                domain='lyricfind.com')
+        )
+        song_data: SongData = None
+
+        try:
+            if not self.__track:
+                self.__track = await self.__lf_client.get_track(trackid=f'isrc:{self.__playable.isrc}')
+
+            if not self.__lyrics or (self.__target_lang and self.__target_lang == self.__available_lang[0]):
+                song_data: SongData = await self.__lf_client.get_lyrics(track=self.__track)
+                if not self.__available_lang:
+                    self.__available_lang.append(song_data.language)
+                    if song_data.available_translations:
+                        self.__available_lang.extend(
+                            song_data.available_translations)
+
+                    self.__available_lang = [
+                        [x, choice(self.__rand_emoji)] for x in self.__available_lang]
+
+                self.__lyrics = song_data.lyrics
+        except (LFException, Exception) as e:
+            embed.description = f'```arm\n{e}\n```'
+            self.clear_items()
+            return embed
+
+        self.__pass_data_to_option()
+        embed.title = f"🎼 Lyrics of {self.__track.title} - {self.__track.artist}"
+        embed.description = self.__lyrics
+        embed.color = YggUtil.convert_color(YggConfig.Color.GENERAL)
+
+        return embed
+
+    def __pass_data_to_option(self) -> None:
+        if len(self.__available_lang) == 1:
+            self.clear_items()
+        else:
+            self._selector.options.clear()
+
+        index_target: int = 0
+
+        if self.__target_lang:
+            index_target = self.__available_lang.index(self.__target_lang)
+
+        for index, lang in enumerate(self.__available_lang):
+            desc: str = None
+            if index == 0:
+                desc = "Default language"
+            elif index == index_target:
+                desc = "Current language"
+
+            self._selector.append_option(SelectOption(
+                label=lang[0].upper(),
+                emoji=lang[1],
+                description=desc,
+                value=str(index)
+            ))
+
+        self._selector.options[index_target].default = True
+
+    def __update_state_selected(self) -> None:
+        self._selector.placeholder = f"{self._selector.options[int(self._selector.values[0])].emoji} \
+              {self._selector.options[int(self._selector.values[0])].label}"
+
+    async def __update_message(self, interaction: Interaction):
+        embed: Embed = await self.create_embed()
+        embed.timestamp = interaction.created_at
+        await interaction.edit_original_response(view=self, embed=embed)
+
+    async def on_timeout(self) -> None:
+        await self.__interaction.delete_original_response()
+        return await super().on_timeout()
+
+    @select(placeholder="🈴 Available Translations!")
+    async def _selector(self, interaction: Interaction, select: Select) -> None:
+        await interaction.response.defer()
+        self.__target_lang = self.__available_lang[int(select.values[0])]
+
+        if self.__target_lang != self.__available_lang[0]:
+            tl: Translation = await self.__lf_client.get_translation(self.__track, self.__target_lang[0])
+            self.__lyrics = tl.translation
+
+        self.__update_state_selected()
+        await self.__update_message(interaction=interaction)
+
+
+class SelectViewTrack(View):
+
+    SHOW_LIMIT: int = 25
+
+    def __init__(self, control: TrackPlayerInterface, intercation: Interaction, /, data: list[Playable],
+                 is_jump_command: bool = False, autoplay: bool = None, force_play: bool = False, put_front: bool = False, *, timeout: float | None = 180):
+        self.__data: list[Playable] = list(data)
         self.__track_control: TrackPlayerInterface = control
         self.__interaction: Interaction = intercation
 
-        self.__selected: Playable | CustomSpotifyTrack = None
+        self.__selected: Playable = None
         self.__is_jump_command: bool = is_jump_command
         self.__autoplay: bool = autoplay
         self.__force_play: bool = force_play
@@ -229,8 +304,8 @@ class SelectView(View):
 
         self.__current_page: int = 1
 
-        self.__rand_emoji: list(
-            str) = ["🎼", "🎵", "🎶", "🎸", "🎷", "🎺", "🎹", "🥁", "🪕", "🎻"]
+        self.__rand_emoji: list[str] = [
+            "🎼", "🎵", "🎶", "🎸", "🎷", "🎺", "🎹", "🥁", "🪕", "🎻"]
 
         if not self.__data:
             raise IndexError
@@ -246,7 +321,7 @@ class SelectView(View):
         self.__pass_data_to_option(data=data)
         embed: Embed = Embed(title=("🔍 Here's the result" if not self.__is_jump_command else "⏭️ Jump to which track?"),
                              description="To play/queue the track, open the dropdown menu and select the desired track. Your track will be played/queued after this",
-                             color=YggUtil.convert_color(YggConfig.COLOR['general']))
+                             color=YggUtil.convert_color(YggConfig.Color.GENERAL))
 
         if total_pages > 1:
             embed.title += f" - Page {self.__current_page} of {total_pages}"
@@ -255,7 +330,7 @@ class SelectView(View):
 
         return embed
 
-    def __get_current_page_data(self) -> list[Playable | CustomSpotifyTrack]:
+    def __get_current_page_data(self) -> list[Playable]:
         start_index = 0
         end_index = self.SHOW_LIMIT
 
@@ -265,7 +340,7 @@ class SelectView(View):
 
         return self.__data[start_index:end_index]
 
-    def __pass_data_to_option(self, data: list[Playable | CustomSpotifyTrack]) -> None:
+    def __pass_data_to_option(self, data: list[Playable]) -> None:
         if self._selector.options:
             self._selector.options.clear()
 
@@ -274,7 +349,7 @@ class SelectView(View):
         for track in data:
             self._selector.append_option(SelectOption(
                 label=YggUtil.truncate_string(track.title, max=100), description=f"{YggUtil.truncate_string(track.author, max=50)}\
-                      - {UtilTrackPlayer.parseSec(track.duration)}", emoji=choice(self.__rand_emoji), value=str(index)))
+                      - {UtilTrackPlayer.parse_sec(track.length)}", emoji=choice(self.__rand_emoji), value=str(index)))
             index += 1
 
     def __max_pages(self) -> int:
@@ -317,17 +392,14 @@ class SelectView(View):
 
     async def __update_message(self, interaction: Interaction):
         self.__update_buttons()
-        await interaction.edit_original_response(view=self, embed=self.get_embed)
+        embed: Embed = self.get_embed
+        embed.timestamp = YggUtil.get_time()
+        await interaction.edit_original_response(view=self, embed=embed)
 
     async def interaction_check(self, interaction: Interaction) -> bool:
         isTrue: bool = True
         if interaction.user.id != self.__interaction.user.id:
-            await YggUtil.send_response(
-                interaction,
-                message="Couldn't do that. \nThis is not your request!!",
-                emoji="🛑",
-                ephemeral=True,
-            )
+            await YggUtil.send_response(interaction, message="Couldn't do that. \nThis is not your request!!", emoji="🛑", ephemeral=True)
             isTrue = False
 
         return isTrue
@@ -349,11 +421,10 @@ class SelectView(View):
         self.__selected = self.__data[int(select.values[0])]
         embed: Embed = await self.__track_control._play_response(
             self.__interaction.user,
-            track=self.__selected,
-            is_queued=True if player and player.is_playing() else False,
+            self.__selected,
+            is_queued=True if player and player.playing else False,
             is_put_front=True if self.__put_front or self.__force_play or self.__is_jump_command else False,
-            is_autoplay=self.__autoplay,
-            uri=self.__selected.uri
+            is_autoplay=self.__autoplay
         )
 
         if not self.__is_jump_command:
@@ -398,10 +469,11 @@ class SelectView(View):
 
 
 class QueueView(View):
+
     SHOW_LIMIT: int = 10
 
-    def __init__(self, queue: chain | BaseQueue, interaction: Interaction, is_history: bool = False, *, timeout: float | None = 180):
-        self.__data: list[Playable | CustomSpotifyTrack] = list(queue)
+    def __init__(self, queue: chain | Queue, interaction: Interaction, is_history: bool = False, *, timeout: float | None = 180):
+        self.__data: list[Playable] = list(queue)
 
         self.__current_page: int = 1
         self.__is_history: bool = is_history
@@ -420,17 +492,17 @@ class QueueView(View):
         total_pages: int = self.__max_pages()
         embed: Embed = Embed(
             title=f"📃 Queue {'history' if self.__is_history else ''} - Page {self.__current_page} of {total_pages}",
-            color=YggUtil.convert_color(YggConfig.COLOR['general']))
+            color=YggUtil.convert_color(YggConfig.Color.GENERAL))
         count: int = (self.__current_page-1) * self.SHOW_LIMIT
         embed.description = str()
 
         for track in data:
             count += 1
-            embed.description += f"{count}. **[{YggUtil.truncate_string(track.title)}]({track.uri})** - {UtilTrackPlayer.parseSec(track.duration)}\n"
+            embed.description += f"{count}. **[{YggUtil.truncate_string(track.title)}]({track.uri})** - {UtilTrackPlayer.parse_sec(track.length)}\n"
 
         return embed
 
-    def __get_current_page_data(self) -> list[Playable | CustomSpotifyTrack]:
+    def __get_current_page_data(self) -> list[Playable]:
         start_index = 0
         end_index = self.SHOW_LIMIT
 
@@ -464,7 +536,9 @@ class QueueView(View):
 
     async def __update_message(self, interaction: Interaction):
         self.__update_buttons()
-        await interaction.edit_original_response(view=self, embed=self.get_embed)
+        embed: Embed = self.get_embed
+        embed.timestamp = interaction.created_at
+        await interaction.edit_original_response(view=self, embed=embed)
 
     async def on_timeout(self) -> None:
         await self.__interaction.delete_original_response()

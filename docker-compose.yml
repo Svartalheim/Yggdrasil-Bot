@@ -2,23 +2,22 @@ version: "3.9"
 
 services:
   lavalink:
-    container_name: lavalink
-    image: fredboat/lavalink:master
+    image: ghcr.io/lavalink-devs/lavalink:4
+    environment:
+      # SERVER NODE CONFIG
+      - SERVER_PORT = 2333
+      - LAVALINK_SERVER_PASSWORD = youshallnotpass
     volumes:
       - ./Lavalink/application.yml:/opt/Lavalink/application.yml
-    ports:
-      - '2333:2333'
-    restart: always
+      - ./Lavalink/plugins/:/opt/Lavalink/plugins/
+    restart: on-failure
 
   bot:
     build:
       context: .
       dockerfile: Dockerfile
     restart: on-failure
-    depends_on:
-      - lavalink
     links:
-      - 'lavalink:localhost'
+      - lavalink
     env_file:
       - .env
-  

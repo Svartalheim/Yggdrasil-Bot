@@ -1,414 +1,462 @@
-from asyncio import gather
+from asyncio import gather, Queue, create_task
+from random import shuffle
 from enum import Enum
-from typing import Any, Tuple
+from typing import TypeAlias
 from abc import ABC, abstractmethod
+from collections import deque
+from logging import Logger, getLogger
+from re import sub
 
 from yarl import URL
 
-from pykakasi import kakasi
-
-from discord import Interaction, Embed, Member
+from discord import (
+    Client,
+    Interaction,
+    Embed,
+    Member,
+    Message
+)
+from discord.abc import Connectable
 
 from wavelink import (
-    Player,
     Playable,
-    YouTubeMusicTrack,
-    YouTubeTrack,
-    YouTubePlaylist,
     Playlist,
-    InvalidLavalinkResponse,
-    Node,
-    NodePool
+    Player,
+    Pool,
+    Search,
+    LavalinkException,
+    LavalinkLoadException,
+    Filters,
+    AutoPlayMode,
+    Queue as waveQ
 )
-from wavelink.types.track import Track as TrackPayload
-from wavelink.ext.spotify import (
-    SpotifyTrack,
-    SpotifyClient,
-    SpotifyRequestError,
-    SpotifyDecodePayload,
-    decode_url,
-    SpotifySearchType,
-    RECURL
-)
+from wavelink.node import Node
+from wavelink.tracks import PlaylistInfo
+from wavelink.types.request import Request as RequestPayload
+from wavelink.enums import NodeStatus, QueueMode
+from wavelink.payloads import TrackEndEventPayload
 
-# from ..util import ModularUtil
 
+class CustomYouTubeMusicPlayable(Playable):
 
-class CustomYouTubeMusicTrack(YouTubeMusicTrack):
+    def __init__(self, data, *, playlist: PlaylistInfo | None = None) -> None:
+        super().__init__(data, playlist=playlist)
+        if playlist is not None and playlist.url:
+            self._playlist.url = playlist.url.replace(
+                'www', 'music') or playlist.url
+        self._uri = self._uri.replace('www', 'music')
 
-    def __init__(self, data: TrackPayload) -> None:
-        super().__init__(data)
-        self.uri = self.uri.replace('www', 'music')
 
+T_a: TypeAlias = list[Playable] | Playlist
 
-class CustomSpotifyTrack(SpotifyTrack):
-
-    __slots__ = ('fetched')
-
-    def __init__(self, data: dict[str, Any]) -> None:
-        super().__init__(data)
-
-        self.uri: str = self.__spotify_link_fixed(self.uri)
-        self.images: str = self.images[0]
-
-        self.fetched: YouTubeTrack | CustomYouTubeMusicTrack = None
-
-    def __str__(self) -> str:
-        return f'{self.name} - {self.author}'
-
-    @property
-    def author(self):
-        return ', '.join(self.artists).strip()
-
-    @staticmethod
-    def __spotify_link_fixed(uri: str) -> str:
-        openable_link: str = "https://open.spotify.com/{track_type}/{id}"
-        uri_split: list[str] = uri.split(":")
-        id: str = uri_split[2]
-        track_type: str = uri_split[1]
-
-        return openable_link.format(track_type=track_type, id=id)
-
-    @classmethod
-    async def search(
-            cls,
-            query: str,
-            *,
-            node: Node | None = None,
-            limit: int = 10
-    ) -> list['CustomSpotifyTrack']:
-        """|coro|
-
-        Search for tracks with the given query.
-
-        Parameters
-        ----------
-        query: str
-            The Spotify URL to query for.
-        node: Optional[:class:`wavelink.Node`]
-            An optional Node to use to make the search with.
-
-        Returns
-        -------
-        List[:class:`SpotifyTrack`]
-
-        Examples
-        --------
-        Searching for a singular tack to play...
-
-        .. code:: python3
-
-            tracks: list[spotify.SpotifyTrack] = await spotify.SpotifyTrack.search(query=SPOTIFY_URL)
-            if not tracks:
-                # No tracks found, do something?
-                return
-
-            track: spotify.SpotifyTrack = tracks[0]
-
-
-        Searching for all tracks in an album...
-
-        .. code:: python3
-
-            tracks: list[spotify.SpotifyTrack] = await spotify.SpotifyTrack.search(query=SPOTIFY_URL)
-            if not tracks:
-                # No tracks found, do something?
-                return
-
-
-        .. versionchanged:: 2.6.0
-
-            This method no longer takes in the ``type`` parameter. The query provided will be automatically decoded,
-            if the ``type`` returned by :func:`decode_url` is unusable, this method will return an empty :class:`list`
-        """
-        if node is None:
-            node: Node = NodePool.get_connected_node()
-
-        if not query.startswith('http'):
-            data: dict = dict()
-
-            sp_client: SpotifyClient = node._spotify
-            if sp_client.is_token_expired():
-                await sp_client._get_bearer_token()
-
-            uri = "https://api.spotify.com/v1/search?q={q}&type={type}&limit={limit}"
-            uri = uri.format(q=query, type="track", limit=limit)
-
-            async with sp_client.session.get(uri, headers=sp_client.bearer_headers) as resp:
-                if resp.status == 400:
-                    return None
-
-                elif resp.status != 200:
-                    raise SpotifyRequestError(resp.status, resp.reason)
-
-                data = await resp.json()
-                data = data['tracks']['items']
-
-            return [CustomSpotifyTrack(data=x) for x in data]
-        else:
-            decoded: SpotifyDecodePayload = decode_url(query)
-
-            if not decoded or decoded.type is SpotifySearchType.unusable:
-                # logger.debug(f'Spotify search handled an unusable search type for query: "{query}".')
-                return []
-
-            return [CustomSpotifyTrack(data=x.raw) for x in await node._spotify._search(query=query, type=decoded.type)]
-
-    async def fulfill(self, *, player: Player, populate: bool) -> None:
-        """Used to fulfill the :class:`wavelink.Player` Auto Play Queue.
-
-        .. warning::
-
-            Usually you would not call this directly. Instead you would set :attr:`wavelink.Player.autoplay` to true,
-            and allow the player to fulfill this request automatically.
-
-
-        Parameters
-        ----------
-        player: :class:`wavelink.player.Player`
-            If :attr:`wavelink.Player.autoplay` is enabled, this search will fill the AutoPlay Queue with more tracks.
-        cls
-            The class to convert this Spotify Track to.
-        """
-
-        yt_track: YouTubeTrack = None
-        ytms_track: CustomYouTubeMusicTrack = None
-
-        async def __search_based(cls: YouTubeTrack | CustomYouTubeMusicTrack) -> YouTubeTrack | CustomYouTubeMusicTrack:
-            tracks: CustomYouTubeMusicTrack | YouTubeTrack = None
-            if not self.isrc:
-                tracks: list[cls] = await cls.search(f'{self.name} - {self.artists[0]}')
-
-            else:
-                tracks: list[cls] = await cls.search(f'"{self.isrc}"')
-
-                if not tracks:
-                    tracks: list[cls] = await cls.search(f'{self.name} - {self.artists[0]}')
-
-            return tracks[0] if tracks else None
-
-        def __was_contains_japanese(text: str) -> bool:
-            for char in text:
-                if ('\u4e00' <= char <= '\u9fff'  # Kanji
-                        or '\u3040' <= char <= '\u309f'  # Hiragana
-                        or '\u30a0' <= char <= '\u30ff'  # Katakana
-                        or '\u31f0' <= char <= '\u31ff'  # Katakana Phonetic Extensions
-                        or '\uff66' <= char <= '\uff9f'  # Halfwidth Katakana
-                    ):
-                    return True
-            return False
-
-        async def __populate_seeds() -> None:
-            node: Node = player.current_node
-            sc: SpotifyClient | None = node._spotify
-
-            if not sc:
-                raise RuntimeError(
-                    f"There is no spotify client associated with <{node:!r}>")
-
-            if sc.is_token_expired():
-                await sc._get_bearer_token()
-
-            if len(player._track_seeds) == 5:
-                player._track_seeds.pop(0)
-
-            player._track_seeds.append(self.id)
-
-            url: str = RECURL.format(tracks=','.join(player._track_seeds))
-            async with node._session.get(url=url, headers=sc.bearer_headers) as resp:
-                if resp.status != 200:
-                    raise SpotifyRequestError(resp.status, resp.reason)
-
-                data = await resp.json()
-
-            history = set(player.queue) | set(player.auto_queue) | set(
-                    player.auto_queue.history) | {self}
-
-            for reco in data['tracks']:
-                reco = CustomSpotifyTrack(reco)
-
-                if reco in history:
-                    continue
-
-                await player.auto_queue.put_wait(reco)
-
-            return None
-
-        yt_track, ytms_track = await gather(
-            __search_based(cls=YouTubeTrack),
-            __search_based(cls=CustomYouTubeMusicTrack)
-        )
-
-        if populate:
-            await __populate_seeds()
-
-        artist_converted: str = next((x['hepburn'] for x in kakasi().convert(
-            text=self.author) if __was_contains_japanese(text=str(self.author))), self.author)
-
-        if ytms_track and artist_converted.casefold() in ytms_track.author.casefold():
-            self.fetched = ytms_track
-            return
-            # return ModularUtil.simple_log(f'Fulfilled {self} with {self.fetched} from {type(self.fetched).__name__}.', )
-
-        if yt_track and ('music' in yt_track.title.casefold()
-                         or 'topic' in yt_track.author.casefold()
-                         or artist_converted.casefold() in yt_track.author.casefold()
-                         ):
-            yt_track: CustomYouTubeMusicTrack = CustomYouTubeMusicTrack(
-                data=yt_track.data)
-
-        self.fetched = yt_track
-        return
-        # return ModularUtil.simple_log(f'Fulfilled {self} with {self.fetched} from {type(self.fetched).__name__}.', )
+logger: Logger = getLogger('wavelink.Player')
 
 
 class CustomPlayer(Player):
 
-    async def play(self,
-                   track: Playable | CustomSpotifyTrack,
-                   replace: bool = True,
-                   start: int | None = None,
-                   end: int | None = None,
-                   volume: int | None = None,
-                   *,
-                   populate: bool = False
-                   ) -> Playable:
-        """|coro|
+    def __init__(self, client: Client = ..., channel: Connectable = ..., *, nodes: list[Node] | None = None) -> None:
+        super().__init__(client, channel, nodes=nodes)
+        self.__previous_seeds: Queue[str] = Queue(
+            maxsize=self._previous_seeds_cutoff)
 
-        Play a WaveLink Track.
+        self.interaction: Interaction = None
+        self.message: Message = None
+
+    # TODO Create YTMusic Converter
+    async def covert_into_ytm(self, playable: Playable):
+        try:
+            conv: Playable = await Pool.fetch_tracks(f'ytmsearch:{playable.title}')
+            conv = conv[0]
+            return CustomYouTubeMusicPlayable(data=conv.raw_data, playlist=conv.playlist)
+        except:
+            return CustomYouTubeMusicPlayable(data=playable.raw_data, playlist=playable.playlist)
+
+    # TODO FUlfill spotify info empty
+    async def fulfill_spotify(self, playable: Playable):
+        try:
+            if playable.source == 'spotify':
+                conv: Playable = await Pool.fetch_tracks(playable.uri)
+            else:
+                def __clean_official(query: str):
+                    query = sub(r'\s*\(.*?\)', '', playable.title)
+                    return query.strip()
+
+                conv: Playable = await Pool.fetch_tracks(f'spsearch:{__clean_official(playable.title)}')
+
+            conv = conv[0]
+            return conv
+        except:
+            return playable
+
+    async def _auto_play_event(self, payload: TrackEndEventPayload) -> None:
+        if self._autoplay is AutoPlayMode.disabled:
+            self._inactivity_start()
+            return
+
+        if self._error_count >= 3:
+            logger.warning(
+                "AutoPlay was unable to continue as you have received too many consecutive errors."
+                "Please check the error log on Lavalink."
+            )
+            self._inactivity_start()
+            return
+
+        if payload.reason == "replaced":
+            self._error_count = 0
+            return
+
+        elif payload.reason == "loadFailed":
+            self._error_count += 1
+
+        else:
+            self._error_count = 0
+
+        if self.node.status is not NodeStatus.CONNECTED:
+            logger.warning(
+                f'"Unable to use AutoPlay on Player for Guild "{self.guild}" due to disconnected Node.')
+            return
+
+        if not isinstance(self.queue, waveQ) or not isinstance(self.auto_queue, waveQ):  # type: ignore
+            logger.warning(
+                f'"Unable to use AutoPlay on Player for Guild "{self.guild}" due to unsupported Queue.')
+            self._inactivity_start()
+            return
+
+        if self.queue.mode is QueueMode.loop:
+            await self._do_partial(history=False)
+
+        elif self.queue.mode is QueueMode.loop_all:
+            await self._do_partial()
+
+        elif self._autoplay is AutoPlayMode.partial or self.queue:
+            await self._do_partial()
+
+        elif self._autoplay is AutoPlayMode.enabled:
+            async with self._auto_lock:
+                await self._do_recommendation()
+
+            # TODO YTMS Caching
+            async def _cache_convert_ytm():
+                cache_limit: int = 3
+                if self.auto_queue.is_empty:
+                    return
+
+                for x in range(cache_limit):
+                    if self.auto_queue.count >= x \
+                            and not 'music' in self.auto_queue[x].uri:
+                        self.auto_queue[x] = await self.covert_into_ytm(self.auto_queue[x])
+
+            # TODO Begin converting auto queue in backgroud
+            if isinstance(self._original, CustomYouTubeMusicPlayable):
+                create_task(_cache_convert_ytm())
+
+    async def _do_recommendation(self):
+        assert self.guild is not None
+        assert self.queue.history is not None and self.auto_queue.history is not None
+
+        # TODO get rec. only when lower than cuttof
+        if self.queue.count > self._auto_cutoff:
+            return
+
+        if len(self.auto_queue) > self._auto_cutoff + 1:
+            # We still do the inactivity start here since if play fails and we have no more tracks...
+            # we should eventually fire the inactivity event...
+            self._inactivity_start()
+
+            track: Playable = self.auto_queue.get()
+            self.auto_queue.history.put(track)
+
+            # TODO Change it into True
+            await self.play(track, add_history=True)
+            return
+
+        weighted_history: list[Playable] = self.queue.history[::-
+                                                              1][: max(5, 5 * self._auto_weight)]
+        weighted_upcoming: list[Playable] = self.auto_queue[: max(
+            3, int((5 * self._auto_weight) / 3))]
+        choices: list[Playable | None] = [*weighted_history,
+                                          *weighted_upcoming, self._current, self._previous]
+
+        # Filter out tracks which are None...
+        _previous: deque[str] = self.__previous_seeds._queue  # type: ignore
+        seeds: list[Playable] = [
+            t for t in choices if t is not None and t.identifier not in _previous]
+        shuffle(seeds)
+
+        spotify: list[str] = [
+            t.identifier for t in seeds if t.source == "spotify"]
+        youtube: list[str] = [
+            t.identifier for t in seeds if t.source == "youtube"]
+
+        spotify_query: str | None = None
+        youtube_query: str | None = None
+
+        count: int = len(self.queue.history)
+        changed_by: int = min(
+            3, count) if self._history_count is None else count - self._history_count
+
+        if changed_by > 0:
+            self._history_count = count
+
+        changed_history: list[Playable] = self.queue.history[::-1]
+
+        added: int = 0
+        for i in range(min(changed_by, 3)):
+            track: Playable = changed_history[i]
+
+            if added == 2 and track.source == "spotify":
+                break
+
+            if track.source == "spotify":
+                spotify.insert(0, track.identifier)
+                added += 1
+
+            elif track.source == "youtube":
+                youtube[0] = track.identifier
+
+        if spotify:
+            spotify_seeds: list[str] = spotify[:3]
+            spotify_query = f"sprec:seed_tracks={','.join(spotify_seeds)}&limit=10"
+
+            for s_seed in spotify_seeds:
+                self._add_to_previous_seeds(s_seed)
+
+        # TODO Better way to get recomendation based on website
+        was_ytms: bool = isinstance(self._original, CustomYouTubeMusicPlayable)
+        if youtube:
+            ytm_seed: str = youtube[0]
+            if was_ytms:
+                youtube_query = f"https://music.youtube.com/watch?v={ytm_seed}8&list=RD{ytm_seed}"
+            else:
+                youtube_query = f"https://youtube.com/watch?v={ytm_seed}8&list=RD{ytm_seed}"
+            self._add_to_previous_seeds(ytm_seed)
+
+        async def _search(query: str | None) -> T_a:
+            if query is None:
+                return []
+
+            try:
+                search: Search = await Pool.fetch_tracks(query)
+            except (LavalinkLoadException, LavalinkException):
+                return []
+
+            if not search:
+                return []
+
+            tracks: list[Playable]
+            if isinstance(search, Playlist):
+                tracks = search.tracks.copy()
+            else:
+                tracks = search
+
+            return tracks
+
+        results: tuple[T_a, T_a] = await gather(_search(spotify_query), _search(youtube_query))
+
+        # track for result in results for track in result...
+        filtered_r: list[Playable] = [t for r in results for t in r]
+
+        if not filtered_r:
+            logger.debug(
+                f'Player "{self.guild.id}" could not load any songs via AutoPlay.')
+            self._inactivity_start()
+            return
+
+        if not self._current:
+            # TODO Convert using yt_ms converter
+            now: CustomYouTubeMusicPlayable | Playable = await self.covert_into_ytm(filtered_r.pop(1)) if was_ytms else filtered_r.pop(1)
+            now._recommended = True
+            self.auto_queue.history.put(now)
+
+            # TODO Change it into True
+            await self.play(now, add_history=True)
+
+        # Possibly adjust these thresholds?
+        history: list[Playable] = (
+            self.auto_queue[:40] + self.queue[:40] +
+            self.queue.history[:-41:-1] + self.auto_queue.history[:-61:-1]
+        )
+
+        added: int = 0
+        for track in filtered_r:
+            if track in history:
+                continue
+
+            track._recommended = True
+            added += await self.auto_queue.put_wait(track)
+
+        # TODO Disable caching
+        # shuffle(self.auto_queue._items)
+        logger.debug(
+            f'Player "{self.guild.id}" added "{added}" tracks to the auto_queue via AutoPlay.')
+
+        # Probably don't need this here as it's likely to be cancelled instantly...
+        self._inactivity_start()
+
+    async def play(
+        self,
+        track: Playable,
+        *,
+        replace: bool = True,
+        start: int = 0,
+        end: int | None = None,
+        volume: int | None = None,
+        paused: bool | None = None,
+        add_history: bool = True,
+        filters: Filters | None = None,
+    ) -> Playable:
+        """Play the provided :class:`~wavelink.Playable`.
 
         Parameters
         ----------
-        track: :class:`tracks.Playable`
-            The :class:`tracks.Playable` or :class:`~wavelink.ext.spotify.SpotifyTrack` track to start playing.
+        track: :class:`~wavelink.Playable`
+            The track to being playing.
         replace: bool
-            Whether this track should replace the current track. Defaults to ``True``.
-        start: Optional[int]
-            The position to start the track at in milliseconds.
-            Defaults to ``None`` which will start the track at the beginning.
+            Whether this track should replace the currently playing track, if there is one. Defaults to ``True``.
+        start: int
+            The position to start playing the track at in milliseconds.
+            Defaults to ``0`` which will start the track from the beginning.
         end: Optional[int]
             The position to end the track at in milliseconds.
-            Defaults to ``None`` which means it will play until the end.
+            Defaults to ``None`` which means this track will play until the very end.
         volume: Optional[int]
             Sets the volume of the player. Must be between ``0`` and ``1000``.
-            Defaults to ``None`` which will not change the volume.
-        populate: bool
-            Whether to populate the AutoPlay queue. Defaults to ``False``.
+            Defaults to ``None`` which will not change the current volume.
+            See Also: :meth:`set_volume`
+        paused: bool | None
+            Whether the player should be paused, resumed or retain current status when playing this track.
+            Setting this parameter to ``True`` will pause the player. Setting this parameter to ``False`` will
+            resume the player if it is currently paused. Setting this parameter to ``None`` will not change the status
+            of the player. Defaults to ``None``.
+        add_history: Optional[bool]
+            If this argument is set to ``True``, the :class:`~Player` will add this track into the
+            :class:`wavelink.Queue` history, if loading the track was successful. If ``False`` this track will not be
+            added to your history. This does not directly affect the ``AutoPlay Queue`` but will alter how ``AutoPlay``
+            recommends songs in the future. Defaults to ``True``.
+        filters: Optional[:class:`~wavelink.Filters`]
+            An Optional[:class:`~wavelink.Filters`] to apply when playing this track. Defaults to ``None``.
+            If this is ``None`` the currently set filters on the player will be applied.
 
-            .. versionadded:: 2.0
 
         Returns
         -------
-        :class:`~tracks.Playable`
-            The track that is now playing.
+        :class:`~wavelink.Playable`
+            The track that began playing.
 
 
-        .. note::
+        .. versionchanged:: 3.0.0
 
-            If you pass a :class:`~wavelink.YouTubeTrack` **or** :class:`~wavelink.ext.spotify.SpotifyTrack` and set
-            ``populate=True``, **while** :attr:`~wavelink.Player.autoplay` is set to ``True``, this method will populate
-            the ``auto_queue`` with recommended songs. When the ``auto_queue`` is low on tracks this method will
-            automatically populate the ``auto_queue`` with more tracks, and continue this cycle until either the
-            player has been disconnected or :attr:`~wavelink.Player.autoplay` is set to ``False``.
+            Added the ``paused`` parameter. Parameters ``replace``, ``start``, ``end``, ``volume`` and ``paused``
+            are now all keyword-only arguments.
 
+            Added the ``add_history`` keyword-only argument.
 
-        Example
-        -------
-
-        .. code:: python3
-
-            tracks: list[wavelink.YouTubeTrack] = await wavelink.YouTubeTrack.search(...)
-            if not tracks:
-                # Do something as no tracks were found...
-                return
-
-            await player.queue.put_wait(tracks[0])
-
-            if not player.is_playing():
-                await player.play(player.queue.get(), populate=True)
-
-
-        .. versionchanged:: 2.6.0
-
-            This method now accepts :class:`~wavelink.YouTubeTrack` or :class:`~wavelink.ext.spotify.SpotifyTrack`
-            when populating the ``auto_queue``.
+            Added the ``filters`` keyword-only argument.
         """
-        assert self._guild is not None
+        assert self.guild is not None
 
-        original: Playable | CustomSpotifyTrack = track
-        if isinstance(track, YouTubeTrack) and self.autoplay and populate:
-            was_ytms: bool = isinstance(track, CustomYouTubeMusicTrack)
-            query: str = f'https://{"music" if was_ytms else "www"}.youtube.com/watch?v={track.identifier}&list=RD{track.identifier}'
+        original_vol: int = self._volume
+        vol: int = volume or self._volume
 
-            try:
-                recos: YouTubePlaylist = await self.current_node.get_playlist(query=query, cls=YouTubePlaylist)
-                recos: list[YouTubeTrack] = getattr(recos, 'tracks', [])
+        if vol != self._volume:
+            self._volume = vol
 
-                queues = set(self.queue) | set(self.auto_queue) | set(
-                    self.auto_queue.history) | {track}
+        # TODO Do Spotify fulfill if playlist
+        if track.source == 'spotify' and not track.artist.artwork:
+            tmp: Playable = await self.fulfill_spotify(track)
+            track = tmp
 
-                for track_ in recos:
-                    track_ = CustomYouTubeMusicTrack(
-                        data=track_.data) if was_ytms else track_
+        if replace or not self._current:
+            self._current = track
+            self._original = track
 
-                    if track_ in queues:
-                        continue
+        old_previous = self._previous
+        self._previous = self._current
 
-                    await self.auto_queue.put_wait(track_)
+        pause: bool
+        if paused is not None:
+            pause = paused
+        else:
+            pause = self._paused
 
-            except ValueError:
-                pass
+        if filters:
+            self._filters = filters
 
-        elif isinstance(track, CustomSpotifyTrack):
-            if not track.fetched:
-                await track.fulfill(player=self, populate=populate)
-
-            track = track.fetched
-
-            for attr, value in original.__dict__.items():
-                if hasattr(track, attr):
-                    # ModularUtil.simple_log(f'Player {self.guild.id} was unable to set attribute "{attr}" '
-                    #                f'when converting a SpotifyTrack as it conflicts with the new track type.')
-                    continue
-
-                setattr(track, attr, value)
-
-        data = {
-            'encodedTrack': track.encoded,
-            'position': start or 0,
-            'volume': volume or self._volume
+        request: RequestPayload = {
+            "track": {"encoded": track.encoded, "userData": dict(track.extras)},
+            "volume": vol,
+            "position": start,
+            "endTime": end,
+            "paused": pause,
+            "filters": self._filters(),
         }
 
-        if end:
-            data['endTime'] = end
-
-        self._current = track
-        self._original = original
-
         try:
-
-            resp: dict[str, Any] = await self.current_node._send(
-                method='PATCH',
-                path=f'sessions/{self.current_node._session_id}/players',
-                guild_id=self._guild.id,
-                data=data,
-                query=f'noReplace={not replace}'
-            )
-
-        except InvalidLavalinkResponse as e:
+            await self.node._update_player(self.guild.id, data=request, replace=replace)
+        except LavalinkException as e:
             self._current = None
             self._original = None
-            # ModularUtil.simple_log(f'Player {self._guild.id} attempted to load track: {track}, but failed: {e}')
+            self._previous = old_previous
+            self._volume = original_vol
             raise e
 
-        self._player_state['track'] = resp['track']['encoded']
+        # TODO Do isrc finding here too
+        if not track.isrc:
+            tmp: Playable = await self.fulfill_spotify(track)
+            track._isrc = tmp.isrc
 
-        if not (self.queue.loop and self.queue._loaded):
-            self.queue.history.put(original)
+        # TODO Reasign track
+        if replace or not self._current:
+            self._current = track
+            self._original = track
 
-        self.queue._loaded = track
+        self._paused = pause
 
-        # ModularUtil.simple_log(f'Player {self._guild.id} loaded and started playing track: {track}.', )
+        if add_history:
+            assert self.queue.history is not None
+            self.queue.history.put(track)
+
+        # TODO do recomendation after playing, if auto_queue empty
+        if self.autoplay is AutoPlayMode.enabled and self.auto_queue.is_empty:
+            create_task(self._do_recommendation())
+
+        # TODO Spotify fullfill
+        async def _cache_fulfill_sp(queue: waveQ):
+            cache_limit: int = 3
+            if queue.is_empty:
+                return
+            for x in range(cache_limit):
+                try:
+                    if queue.count >= x \
+                            and queue[x].source == 'spotify' \
+                            and not queue[x].artist.artwork:
+                        queue[x] = await self.fulfill_spotify(queue[x])
+                except:
+                    continue
+
+        # TODO ISRC caching
+        async def _cache_isrc(queue: waveQ):
+            cache_limit: int = 3
+            if self.queue.is_empty:
+                return
+
+            for x in range(cache_limit):
+                try:
+                    if self.queue.count >= x \
+                            and not queue[x].isrc:
+                        temp: Playable = await self.fulfill_spotify(queue[x])
+                        queue[x]._isrc = temp.isrc
+                except:
+                    continue
+
+        # TODO Begin searching next isrc
+        create_task(_cache_isrc(self.queue))
+        create_task(_cache_isrc(self.auto_queue))
+
+        # TODO Begin fulfill in background
+        create_task(_cache_fulfill_sp(self.queue))
+        create_task(_cache_fulfill_sp(self.auto_queue))
+
         return track
 
 
@@ -437,10 +485,8 @@ class TrackType(Enum):
         if uri.startswith('http'):
             url: URL = URL(uri)
 
-            if self is self.SPOTIFY \
-                    and decode_url(uri).type in (SpotifySearchType.playlist, SpotifySearchType.album):
-                return True
-            elif url.query.get('list') or 'sets' in url.path:
+            # TODO Checking palylist
+            if url.query.get('list') or any(item in url.path for item in ['playlist', 'album', 'sets']):
                 return True
 
         return False
@@ -464,21 +510,13 @@ class TrackType(Enum):
 class TrackPlayerInterface(ABC):
 
     @abstractmethod
-    async def _play_response(self, member: Member, /, track: Playlist | Playable | CustomSpotifyTrack | list[CustomSpotifyTrack],
-                             is_playlist: bool = False, is_queued: bool = False, is_put_front: bool = False, is_autoplay: bool = False, uri: str = None) -> Embed:
+    async def _play_response(self, member: Member, track: Playlist | Playable, /, *,
+                             is_playlist: bool = False, is_queued: bool = False, is_put_front: bool = False, is_autoplay: bool = False) -> Embed:
         pass
 
     @abstractmethod
-    def _record_timestamp(self, guild_id: int, interaction: Interaction) -> None:
-        pass
-
-    @abstractmethod
-    def _get_interaction(self, guild_id: int) -> Interaction:
-        pass
-
-    @abstractmethod
-    async def play(self, interaction: Interaction, /, query: str | Playable | CustomSpotifyTrack, source: TrackType = TrackType.YOUTUBE,
-                   autoplay: bool = None, force_play: bool = False, put_front: bool = False) -> Tuple[Playable | Playlist | CustomSpotifyTrack, bool, bool]:
+    async def play(self, interaction: Interaction, /, query: str | Playable, source: TrackType = TrackType.YOUTUBE,
+                   autoplay: bool = None, force_play: bool = False, put_front: bool = False) -> tuple[Playable | Playlist, bool, bool]:
         pass
 
     @abstractmethod
@@ -486,7 +524,7 @@ class TrackPlayerInterface(ABC):
         pass
 
     @abstractmethod
-    async def previous(self, interaction: Interaction) -> Tuple[bool, bool]:
+    async def previous(self, interaction: Interaction) -> tuple[bool, bool]:
         pass
 
     @abstractmethod
@@ -502,5 +540,5 @@ class TrackPlayerInterface(ABC):
         pass
 
     @abstractmethod
-    async def resume(self, interaction: Interaction) -> bool:
+    async def resume(self, interaction: Interaction) -> None:
         pass
