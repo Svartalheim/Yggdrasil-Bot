@@ -78,16 +78,15 @@ class TrackView(View):
         if self.__is_loop_queue:
             embed.add_field(
                 name="Loop Queue",
-                value="Active"
+                value="Active",
+                inline=False
             )
 
         for key, val in self.__player.current_filter_state().items():
             if bool(val):
                 embed.add_field(
                     name=f"{str(key).capitalize()} Filter",
-                    value=str(val),
-                    inline=True
-                )
+                    value=str(val))
 
         embed.set_thumbnail(url=track.artist.artwork)
         embed.set_image(url=self.__player.current.artwork)

@@ -301,9 +301,7 @@ class TrackPlayer(TrackPlayerBase):
             embed.add_field(
                 name=key.removeprefix('_').replace('_', ' ').capitalize(),
                 value=value if not value.startswith(
-                    'http') else f'[here]({value})',
-                inline=True
-            )
+                    'http') else f'[here]({value})')
 
         return embed
 
@@ -468,27 +466,27 @@ class TrackPlayer(TrackPlayerBase):
 
         if effect is FiltersTemplate.NIGHT_CORE:
             res = await __filter_nightcore()
-            embed.add_field(name="Nightcore", value=res, inline=True)
+            embed.add_field(name="Nightcore", value=res)
 
         elif effect is FiltersTemplate.VAPOR_WAVE:
             res = await __filter_vaporwave()
-            embed.add_field(name="Vaporwave", value=res, inline=True)
+            embed.add_field(name="Vaporwave", value=res)
 
         elif effect is FiltersTemplate.BASS_BOOST:
             res = await __filter_bass_boost()
-            embed.add_field(name="Bass boost", value=res, inline=True)
+            embed.add_field(name="Bass boost", value=res)
 
         elif effect is FiltersTemplate.SOFT:
             res = await __filter_soft()
-            embed.add_field(name="Soft", value=res, inline=True)
+            embed.add_field(name="Soft", value=res)
 
         elif effect is FiltersTemplate.POP:
             res = await __filter_pop()
-            embed.add_field(name="Pop", value=res, inline=True)
+            embed.add_field(name="Pop", value=res)
 
         elif effect is FiltersTemplate.TREBLE_BASS:
             res = await __filter_treble_bass()
-            embed.add_field(name="Treble bass", value=res, inline=True)
+            embed.add_field(name="Treble bass", value=res)
 
         if not embed.fields:
             embed.description = "Nothing to apply"
@@ -549,19 +547,19 @@ class TrackPlayer(TrackPlayerBase):
 
         if karaoke is not None:
             __filter_karaoke(karaoke)
-            embed.add_field(name="Karaoke", value=str(karaoke), inline=True)
+            embed.add_field(name="Karaoke", value=str(karaoke))
 
         if rotation is not None:
             __filter_rotation(rotation)
-            embed.add_field(name="Rotation", value=str(rotation), inline=True)
+            embed.add_field(name="Rotation", value=str(rotation))
 
         if tremolo is not None:
             __filter_tremolo(tremolo)
-            embed.add_field(name="Tremolo", value=str(tremolo), inline=True)
+            embed.add_field(name="Tremolo", value=str(tremolo))
 
         if vibrato is not None:
             __filter_vibrato(vibrato)
-            embed.add_field(name="Vibrato", value=str(vibrato), inline=True)
+            embed.add_field(name="Vibrato", value=str(vibrato))
 
         if not embed.fields:
             embed.description = "Nothing to apply"
