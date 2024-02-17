@@ -12,10 +12,10 @@ from wavelink import (
     QueueMode,
     Album,
     Artist,
-    PlaylistInfo
+    PlaylistInfo,
+    Filters
 )
-from .interfaces import CustomPlayer, TrackType
-from .interfaces import TrackType
+from .interfaces import CustomPlayer, TrackType, FiltersTemplate
 from .util_player import UtilTrackPlayer
 from .base_player import TrackPlayerBase, TrackPlayerDecorator
 from .view import QueueView, SelectViewTrack
@@ -209,7 +209,12 @@ class TrackPlayer(TrackPlayerBase):
             player.queue.reset()
             player.auto_queue.reset()
 
+        player.filters.reset()
+
         await player.stop()
+
+        # TODO Reset inner work
+        player.reset_inner_work()
 
     @TrackPlayerDecorator.record_interaction()
     def clear(self, interaction: Interaction) -> None:
@@ -317,9 +322,7 @@ class TrackPlayer(TrackPlayerBase):
             loop = False
 
         if player.queue.mode is QueueMode.loop:
-            player.queue.put_at(0, player.queue.history[-1])
-        elif player.queue.mode is QueueMode.normal and not is_queue:
-            player.queue.delete(0)
+            player.queue.loaded = player.current
 
         return loop
 
@@ -336,3 +339,233 @@ class TrackPlayer(TrackPlayerBase):
             CustomPlayer, interaction.user.guild.voice_client)
 
         await player.pause(False)
+
+    # Filter Template
+    @TrackPlayerDecorator.record_interaction()
+    async def filters_template(self, interaction: Interaction, /, effect: FiltersTemplate) -> Embed:
+        player: CustomPlayer = cast(
+            CustomPlayer, interaction.user.guild.voice_client)
+        filters: Filters = player.filters
+        embed: Embed = Embed(title="💽 Filters applied",
+                             color=YggUtil.convert_color(
+                                 YggConfig.Color.SUCCESS),
+                             description="It may takes a while to apply"
+                             )
+
+        player.reset_filter()
+        filters.reset()
+
+        async def __filter_nightcore() -> bool:
+            player.nigthcore_filter = not player.nigthcore_filter
+
+            if player.nigthcore_filter:
+                filters.timescale.set(
+                    pitch=1.2,
+                    speed=1.2,
+                    rate=1
+                )
+
+            await player.set_filters(filters)
+            return player.nigthcore_filter
+
+        async def __filter_vaporwave() -> bool:
+            player.vaporwave_filter = not player.vaporwave_filter
+
+            # TODO Explore filter, setup
+            if player.vaporwave_filter:
+                filters.equalizer.set(bands=[
+                    {'band': 1, 'gain': 0.3},
+                    {'band': 0, 'gain': 0.3},
+                ])
+                filters.timescale.set(
+                    pitch=0.85,
+                    speed=0.8,
+                    rate=1
+                )
+                filters.tremolo.set(
+                    depth=0.3,
+                    frequency=14
+                )
+
+            await player.set_filters(filters)
+            return player.vaporwave_filter
+
+        async def __filter_bass_boost() -> bool:
+            player.bass_boost_filter = not player.bass_boost_filter
+
+            # TODO Explore filter, setup
+            if player.bass_boost_filter:
+                bass_boost: list = [
+                    {'band': 0, 'gain': 0.225},
+                    {'band': 1, 'gain': 0.225},
+                    {'band': 2, 'gain': 0.225}
+                ]
+                filters.equalizer.set(bands=bass_boost)
+
+            await player.set_filters(filters)
+
+            return player.bass_boost_filter
+
+        async def __filter_soft() -> bool:
+            player.soft_filter = not player.soft_filter
+
+            # TODO Explore filter, setup
+            if player.soft_filter:
+                filters.low_pass.set(smoothing=20.0)
+
+            await player.set_filters(filters)
+
+            return player.soft_filter
+
+        async def __filter_pop() -> bool:
+            player.pop_filter = not player.pop_filter
+
+            # TODO Explore filter, setup
+            if player.pop_filter:
+                pop: list = [
+                    {'band': 0, 'gain': 0.65},
+                    {'band': 1, 'gain': 0.45},
+                    {'band': 2, 'gain': -0.45},
+                    {'band': 3, 'gain': -0.65},
+                    {'band': 4, 'gain': -0.35},
+                    {'band': 5, 'gain': 0.45},
+                    {'band': 6, 'gain': 0.55},
+                    {'band': 7, 'gain': 0.6},
+                    {'band': 8, 'gain': 0.6},
+                    {'band': 9, 'gain': 0.6},
+                ]
+                filters.equalizer.set(bands=pop)
+
+            await player.set_filters(filters)
+
+            return player.pop_filter
+
+        async def __filter_treble_bass() -> bool:
+            player.treble_bass = not player.treble_bass
+
+            # TODO Explore filter, setup
+            if player.treble_bass:
+                treble_bass: list = [
+                    {'band': 0, 'gain': 0.6},
+                    {'band': 1, 'gain': 0.67},
+                    {'band': 2, 'gain': 0.67},
+                    {'band': 3, 'gain': 0},
+                    {'band': 4, 'gain': -0.5},
+                    {'band': 5, 'gain': 0.15},
+                    {'band': 6, 'gain': -0.45},
+                    {'band': 7, 'gain': 0.23},
+                    {'band': 8, 'gain': 0.35},
+                    {'band': 9, 'gain': 0.45},
+                    {'band': 10, 'gain': 0.55},
+                    {'band': 11, 'gain': 0.6},
+                    {'band': 12, 'gain': 0.55},
+                ]
+                filters.equalizer.set(bands=treble_bass)
+
+            await player.set_filters(filters)
+
+            return player.treble_bass
+
+        if effect is FiltersTemplate.NIGHT_CORE:
+            res = await __filter_nightcore()
+            embed.add_field(name="Nightcore", value=res, inline=True)
+
+        elif effect is FiltersTemplate.VAPOR_WAVE:
+            res = await __filter_vaporwave()
+            embed.add_field(name="Vaporwave", value=res, inline=True)
+
+        elif effect is FiltersTemplate.BASS_BOOST:
+            res = await __filter_bass_boost()
+            embed.add_field(name="Bass boost", value=res, inline=True)
+
+        elif effect is FiltersTemplate.SOFT:
+            res = await __filter_soft()
+            embed.add_field(name="Soft", value=res, inline=True)
+
+        elif effect is FiltersTemplate.POP:
+            res = await __filter_pop()
+            embed.add_field(name="Pop", value=res, inline=True)
+
+        elif effect is FiltersTemplate.TREBLE_BASS:
+            res = await __filter_treble_bass()
+            embed.add_field(name="Treble bass", value=res, inline=True)
+
+        if not embed.fields:
+            embed.description = "Nothing to apply"
+
+        return embed
+
+    # Filter
+    @TrackPlayerDecorator.record_interaction()
+    async def filters(self, interaction: Interaction, /, karaoke: bool = None, rotation: bool = None, tremolo: bool = None, vibrato: bool = None) -> Embed:
+        player: CustomPlayer = cast(
+            CustomPlayer, interaction.user.guild.voice_client)
+        filters: Filters = player.filters
+
+        embed: Embed = Embed(title="💽 Filters applied",
+                             description="It may takes a while to apply",
+                             color=YggUtil.convert_color(
+                                 YggConfig.Color.SUCCESS)
+                             )
+
+        def __filter_karaoke(state: bool = False) -> None:
+            player.karaoke_filter = state
+
+            if state:
+                filters.karaoke.set(
+                    level=1.0,
+                    mono_level=1.0,
+                    filter_band=220.0,
+                    filter_width=100.0
+                )
+            else:
+                filters.karaoke.reset()
+
+        def __filter_rotation(state: bool = False) -> None:
+            player.rotation_filter = state
+
+            if state:
+                filters.rotation.set(rotation_hz=0.2)
+            else:
+                filters.rotation.reset()
+
+        def __filter_tremolo(state: bool = False) -> None:
+            player.tremolo_filter = state
+
+            # TODO Explore filter, setup
+            if state:
+                filters.tremolo.set(frequency=10, depth=0.5)
+            else:
+                filters.tremolo.reset()
+
+        def __filter_vibrato(state: bool = False) -> None:
+            player.vibrato_filter = state
+
+            # TODO Explore filter, setup
+            if state:
+                filters.vibrato.set(frequency=10, depth=0.9)
+            else:
+                filters.vibrato.reset()
+
+        if karaoke is not None:
+            __filter_karaoke(karaoke)
+            embed.add_field(name="Karaoke", value=str(karaoke), inline=True)
+
+        if rotation is not None:
+            __filter_rotation(rotation)
+            embed.add_field(name="Rotation", value=str(rotation), inline=True)
+
+        if tremolo is not None:
+            __filter_tremolo(tremolo)
+            embed.add_field(name="Tremolo", value=str(tremolo), inline=True)
+
+        if vibrato is not None:
+            __filter_vibrato(vibrato)
+            embed.add_field(name="Vibrato", value=str(vibrato), inline=True)
+
+        if not embed.fields:
+            embed.description = "Nothing to apply"
+
+        await player.set_filters(filters)
+
+        return embed

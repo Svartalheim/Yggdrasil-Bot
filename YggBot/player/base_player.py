@@ -120,7 +120,6 @@ class TrackPlayerBase:
     def __init__(self) -> None:
         super().__init__()
 
-    # TODO Spotify fix
     async def _custom_wavelink_searcher(self, query: str, track_type: TrackType, is_search: bool = False) -> Playable | Playlist:
         """Will return either List of tracks or Single Tracks"""
         tracks: Search = None

@@ -14,10 +14,10 @@ from discord.app_commands import (
 )
 from discord.ui import View
 
-from wavelink import Playable, Playlist, QueueEmpty
+from wavelink import Playable, Playlist, QueueEmpty, LavalinkLoadException
 
 from .util import YggUtil
-from .player import TrackPlayerDecorator, TrackPlayer, TrackType
+from .player import TrackPlayerDecorator, TrackPlayer, TrackType, FiltersTemplate
 from config import YggConfig
 
 
@@ -57,7 +57,7 @@ class Multimedia(commands.Cog, TrackPlayer):
     @command(name="search", description="Search your track by query")
     @describe(query="YouTube/Soundcloud/Spotify link or keyword",
               source="Get track from different source(Default is YouTube, Spotify will automatically convert into YouTube/YouTubeMusic)",
-              autoplay="Autoplay recomendation from you've been played(Soundcloud not supported)",
+              autoplay="Autoplay recomendation from you've been played(Soundcloud not supported, this will create autoplay queue which different with player queue)",
               force_play="Force to play the track(Previous queue still saved)",
               put_front="Put track on front. Will play after current track end")
     @choices(autoplay=[
@@ -106,13 +106,15 @@ class Multimedia(commands.Cog, TrackPlayer):
             )
         except IndexError:
             embed.description = "❌ Track not found, check your keyword or source"
+        except LavalinkLoadException:
+            embed.description = "💥 Something went wrong while loading track, try again"
 
         await YggUtil.send_response(interaction, embed=embed, view=view)
 
     @command(name="play", description="To play a track from YouTube/Soundcloud/Spotify")
     @describe(query="YouTube/Soundcloud/Spotify link or keyword",
               source="Get track from different source(Default is YouTube, Spotify will automatically convert into YouTube/YouTubeMusic)",
-              autoplay="Autoplay recomendation from you've been played(Soundcloud not supported)",
+              autoplay="Autoplay recomendation from you've been played(Soundcloud not supported, this will create autoplay queue which different with player queue)",
               force_play="Force to play the track(Previous queue still saved)",
               put_front="Put track on front. Will play after current track end")
     @choices(autoplay=[
@@ -170,7 +172,9 @@ class Multimedia(commands.Cog, TrackPlayer):
                 is_autoplay=convert_autoplay
             )
         except IndexError:
-            pass
+            embed.description = "❌ Track not found, check your keyword or source"
+        except LavalinkLoadException:
+            embed.description = "💥 Something went wrong while loading track, try again"
 
         await YggUtil.send_response(interaction, embed=embed)
 
@@ -198,7 +202,7 @@ class Multimedia(commands.Cog, TrackPlayer):
 
         await YggUtil.send_response(interaction, embed=embed, view=view)
 
-    @command(name="skip", description="Skip current track")
+    @command(name="skip", description="Skip current track(prioritized player queue then autoplay queue)")
     @TrackPlayerDecorator.is_client_exist()
     @TrackPlayerDecorator.is_user_allowed()
     @TrackPlayerDecorator.is_playing()
@@ -214,7 +218,7 @@ class Multimedia(commands.Cog, TrackPlayer):
             create_task(YggUtil.send_response(interaction, embed=embed))
         ])
 
-    @command(name="jump", description="Jump on specific track(Put selected track into front)")
+    @command(name="jump", description="Jump on specific track(put selected track into front)")
     @TrackPlayerDecorator.is_client_exist()
     @TrackPlayerDecorator.is_user_allowed()
     @TrackPlayerDecorator.is_playing()
@@ -231,7 +235,7 @@ class Multimedia(commands.Cog, TrackPlayer):
 
         await create_task(YggUtil.send_response(interaction, embed=embed, view=view))
 
-    @command(name="previous", description="Play previous track(All queue still saved)")
+    @command(name="previous", description="Play previous track")
     @TrackPlayerDecorator.is_client_exist()
     @TrackPlayerDecorator.is_user_allowed()
     @TrackPlayerDecorator.is_playing()
@@ -253,7 +257,7 @@ class Multimedia(commands.Cog, TrackPlayer):
 
         await create_task(YggUtil.send_response(interaction, embed=embed))
 
-    @command(name="stop", description="Stop anything(This will reset player back to initial state)")
+    @command(name="stop", description="Stop anything(this will reset player back to default)")
     @TrackPlayerDecorator.is_client_exist()
     @TrackPlayerDecorator.is_user_allowed()
     @TrackPlayerDecorator.is_playing()
@@ -270,7 +274,7 @@ class Multimedia(commands.Cog, TrackPlayer):
             create_task(YggUtil.send_response(interaction, embed=embed))
         ])
 
-    @command(name="clear", description="Clear current queue(This will also disable Autoplay and any loop state)")
+    @command(name="clear", description="Clear current queue(this will also disable Autoplay and any loop state)")
     @TrackPlayerDecorator.is_client_exist()
     @TrackPlayerDecorator.is_user_allowed()
     @TrackPlayerDecorator.is_playing()
@@ -314,7 +318,7 @@ class Multimedia(commands.Cog, TrackPlayer):
 
         await YggUtil.send_response(interaction, embed=embed)
 
-    @command(name="lyrics", description="Get lyrics of the tracks(Fetched from LyricFind)")
+    @command(name="lyrics", description="Get lyrics of the tracks(fetched from LyricFind)")
     @TrackPlayerDecorator.is_client_exist()
     @TrackPlayerDecorator.is_user_allowed()
     @TrackPlayerDecorator.is_playing()
@@ -329,7 +333,7 @@ class Multimedia(commands.Cog, TrackPlayer):
         await YggUtil.send_response(interaction, embed=embed, view=view)
 
     @command(name="loop", description="Loop current Track/Playlist")
-    @describe(is_queue="Loop current player queue, instead current track(History are included)")
+    @describe(is_queue="Loop current player queue, instead current track(if player queue empty, loop through history)")
     @choices(is_queue=[
         Choice(name='True', value=1),
         Choice(name='False', value=0)])
@@ -342,14 +346,13 @@ class Multimedia(commands.Cog, TrackPlayer):
             color=YggUtil.convert_color(YggConfig.Color.SUCCESS)
         )
         conv_is_queue: bool = False
-        was_choice: bool = isinstance(is_queue, Choice)
 
-        if was_choice:
-            conv_is_queue = is_queue.value
+        if isinstance(is_queue, Choice):
+            conv_is_queue = bool(is_queue.value)
 
         loop: bool = self.loop(interaction, is_queue=bool(conv_is_queue))
 
-        if was_choice:
+        if conv_is_queue:
             embed.description = "✅ Loop Queue" if loop else "✅ Unloop Queue"
 
         else:
@@ -392,6 +395,67 @@ class Multimedia(commands.Cog, TrackPlayer):
         )
 
         await self.resume(interaction)
+
+        await wait([
+            create_task(YggUtil.send_response(interaction, embed=embed)),
+            create_task(self._update_player(interaction=interaction))
+        ])
+
+    @command(name="filters", description="List of filter that can be appllied(checkout '/filters_template' for easier use)")
+    @describe(karaoke="Karaoke effect",
+              rotation="Rotation effect(8D Audio)",
+              tremolo="Tremolo effect(Electric guitar effect)",
+              vibrato="Vibrato effect")
+    @choices(karaoke=[
+        Choice(name='True', value=1),
+        Choice(name='False', value=0)],
+        rotation=[
+        Choice(name='True', value=1),
+        Choice(name='False', value=0)],
+        tremolo=[
+        Choice(name='True', value=1),
+        Choice(name='False', value=0)],
+        vibrato=[
+        Choice(name='True', value=1),
+        Choice(name='False', value=0)])
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
+    async def _filters(self, interaction: Interaction, karaoke: Choice[int] = 0, rotation: Choice[int] = 0, tremolo: Choice[int] = 0, vibrato: Choice[int] = 0) -> None:
+        await interaction.response.defer()
+        conv_karak: bool = None
+        conv_rotat: bool = None
+        conv_tremo: bool = None
+        conv_vibra: bool = None
+
+        if isinstance(karaoke, Choice):
+            conv_karak = bool(karaoke.value)
+
+        if isinstance(rotation, Choice):
+            conv_rotat = bool(rotation.value)
+
+        if isinstance(tremolo, Choice):
+            conv_tremo = bool(tremolo.value)
+
+        if isinstance(vibrato, Choice):
+            conv_vibra = bool(vibrato.value)
+
+        embed: Embed = await self.filters(interaction, karaoke=conv_karak, rotation=conv_rotat, tremolo=conv_tremo, vibrato=conv_vibra)
+
+        await wait([
+            create_task(YggUtil.send_response(interaction, embed=embed)),
+            create_task(self._update_player(interaction=interaction))
+        ])
+
+    @command(name="filters_template", description="List of filters template that can be applied(by toggling this, will reset other filters)")
+    @describe(effect="Toggle template filters")
+    @TrackPlayerDecorator.is_client_exist()
+    @TrackPlayerDecorator.is_user_allowed()
+    @TrackPlayerDecorator.is_playing()
+    async def _filters_template(self, interaction: Interaction, effect: FiltersTemplate) -> None:
+        await interaction.response.defer()
+
+        embed: Embed = await self.filters_template(interaction, effect=effect)
 
         await wait([
             create_task(YggUtil.send_response(interaction, embed=embed)),

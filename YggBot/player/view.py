@@ -81,6 +81,14 @@ class TrackView(View):
                 value="Active"
             )
 
+        for key, val in self.__player.current_filter_state().items():
+            if bool(val):
+                embed.add_field(
+                    name=f"{str(key).capitalize()} Filter",
+                    value=str(val),
+                    inline=True
+                )
+
         embed.set_thumbnail(url=track.artist.artwork)
         embed.set_image(url=self.__player.current.artwork)
         embed.set_footer(
