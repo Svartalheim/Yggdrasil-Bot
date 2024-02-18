@@ -1,4 +1,4 @@
-from asyncio import gather, Queue, create_task
+from asyncio import gather, create_task
 from random import shuffle
 from enum import Enum
 from typing import TypeAlias
@@ -28,13 +28,12 @@ from wavelink import (
     LavalinkLoadException,
     Filters,
     AutoPlayMode,
-    Queue as waveQ
+    Queue,
+    QueueEmpty
 )
 from wavelink.node import Node
 from wavelink.tracks import PlaylistInfo
 from wavelink.types.request import Request as RequestPayload
-from wavelink.enums import NodeStatus, QueueMode
-from wavelink.payloads import TrackEndEventPayload
 
 
 class CustomYouTubeMusicPlayable(Playable):
@@ -56,8 +55,6 @@ class CustomPlayer(Player):
 
     def __init__(self, client: Client = ..., channel: Connectable = ..., *, nodes: list[Node] | None = None) -> None:
         super().__init__(client, channel, nodes=nodes)
-        self.__previous_seeds: Queue[str] = Queue(
-            maxsize=self._previous_seeds_cutoff)
 
         self.interaction: Interaction = None
         self.message: Message = None
@@ -111,102 +108,45 @@ class CustomPlayer(Player):
             'treble bass': self.treble_bass
         })
 
-    # TODO Create YTMusic Converter
-    async def covert_into_ytm(self, playable: Playable):
+    # TODO Fulfill ytms stuff
+    async def fulfill_youtube_music(self, playable: Playable) -> Playable:
         try:
-            conv: Playable = await Pool.fetch_tracks(f'ytmsearch:{playable.title}')
-            conv = conv[0]
-            return CustomYouTubeMusicPlayable(data=conv.raw_data, playlist=conv.playlist)
-        except:
-            return CustomYouTubeMusicPlayable(data=playable.raw_data, playlist=playable.playlist)
+            def __clean_official(query: str):
+                query = sub(r'\s*\(.*?\)', '', playable.title)
+                return query.strip()
+
+            trck: list[Playable] = await Pool.fetch_tracks(f'ytmsearch:{__clean_official(playable.title)} {playable.author}')
+            playable = next(
+                (x for x in trck
+                 if x.author.lower() in playable.author.lower()
+                 and x.title.lower() in playable.title.lower()), playable)
+
+        except IndexError:
+            pass
+
+        return playable
 
     # TODO Fulfill spotify info empty
-    async def fulfill_spotify(self, playable: Playable):
+    async def fulfill_spotify(self, playable: Playable) -> Playable:
         try:
 
             if playable.source == 'spotify':
-                conv: Playable = await Pool.fetch_tracks(playable.uri)
+                conv: list[Playable] = await Pool.fetch_tracks(playable.uri)
             else:
                 def __clean_official(query: str):
                     query = sub(r'\s*\(.*?\)', '', playable.title)
                     return query.strip()
 
-                conv: Playable = await Pool.fetch_tracks(f'spsearch:{__clean_official(playable.title)}')
+                conv: list[Playable] = await Pool.fetch_tracks(f'spsearch:{__clean_official(playable.title)}')
 
             conv = conv[0]
             return conv
         except:
             return playable
 
-    async def _auto_play_event(self, payload: TrackEndEventPayload) -> None:
-        if self._autoplay is AutoPlayMode.disabled:
-            self._inactivity_start()
-            return
-
-        if self._error_count >= 3:
-            logger.warning(
-                "AutoPlay was unable to continue as you have received too many consecutive errors."
-                "Please check the error log on Lavalink."
-            )
-            self._inactivity_start()
-            return
-
-        if payload.reason == "replaced":
-            self._error_count = 0
-            return
-
-        elif payload.reason == "loadFailed":
-            self._error_count += 1
-
-        else:
-            self._error_count = 0
-
-        if self.node.status is not NodeStatus.CONNECTED:
-            logger.warning(
-                f'"Unable to use AutoPlay on Player for Guild "{self.guild}" due to disconnected Node.')
-            return
-
-        if not isinstance(self.queue, waveQ) or not isinstance(self.auto_queue, waveQ):  # type: ignore
-            logger.warning(
-                f'"Unable to use AutoPlay on Player for Guild "{self.guild}" due to unsupported Queue.')
-            self._inactivity_start()
-            return
-
-        if self.queue.mode is QueueMode.loop:
-            await self._do_partial(history=False)
-
-        elif self.queue.mode is QueueMode.loop_all:
-            await self._do_partial()
-
-        elif self._autoplay is AutoPlayMode.partial or self.queue:
-            await self._do_partial()
-
-        elif self._autoplay is AutoPlayMode.enabled:
-            async with self._auto_lock:
-                await self._do_recommendation()
-
-            # TODO YTMS Caching
-            async def _cache_convert_ytm():
-                cache_limit: int = 3
-                if self.auto_queue.is_empty:
-                    return
-
-                for x in range(cache_limit):
-                    if self.auto_queue.count >= x \
-                            and not 'music' in self.auto_queue[x].uri:
-                        self.auto_queue[x] = await self.covert_into_ytm(self.auto_queue[x])
-
-            # TODO Begin converting auto queue in backgroud
-            if isinstance(self._original, CustomYouTubeMusicPlayable):
-                create_task(_cache_convert_ytm())
-
     async def _do_recommendation(self):
         assert self.guild is not None
         assert self.queue.history is not None and self.auto_queue.history is not None
-
-        # TODO get rec. only when lower than cuttof
-        if self.queue.count > self._auto_cutoff:
-            return
 
         if len(self.auto_queue) > self._auto_cutoff + 1:
             # We still do the inactivity start here since if play fails and we have no more tracks...
@@ -228,7 +168,9 @@ class CustomPlayer(Player):
                                           *weighted_upcoming, self._current, self._previous]
 
         # Filter out tracks which are None...
-        _previous: deque[str] = self.__previous_seeds._queue  # type: ignore
+        # TODO Change variable name, to get mangled variable
+        # type: ignore
+        _previous: deque[str] = self._Player__previous_seeds._queue
         seeds: list[Playable] = [
             t for t in choices if t is not None and t.identifier not in _previous]
         shuffle(seeds)
@@ -285,8 +227,15 @@ class CustomPlayer(Player):
             if query is None:
                 return []
 
+            def _into_custom_ytms(trck: Playable) -> CustomYouTubeMusicPlayable:
+                return CustomYouTubeMusicPlayable(data=trck.raw_data, playlist=trck.playlist)
+
             try:
                 search: Search = await Pool.fetch_tracks(query)
+
+                # TODO Change into ytms, iw it was ytms
+                if was_ytms:
+                    search.tracks = list(map(_into_custom_ytms, search.tracks))
             except (LavalinkLoadException, LavalinkException):
                 return []
 
@@ -312,20 +261,27 @@ class CustomPlayer(Player):
             self._inactivity_start()
             return
 
-        if not self._current:
-            # TODO Convert using yt_ms converter
-            now: CustomYouTubeMusicPlayable | Playable = await self.covert_into_ytm(filtered_r.pop(1)) if was_ytms else filtered_r.pop(1)
-            now._recommended = True
-            self.auto_queue.history.put(now)
-
-            # TODO Change it into True
-            await self.play(now, add_history=True)
+        # TODO Move it under history, play
 
         # Possibly adjust these thresholds?
         history: list[Playable] = (
             self.auto_queue[:40] + self.queue[:40] +
             self.queue.history[:-41:-1] + self.auto_queue.history[:-61:-1]
         )
+
+        if not self._current:
+            now: Playable = filtered_r.pop(1)
+            # TODO add check if alread in history
+            if not now in history:
+                now._recommended = True
+                self.auto_queue.history.put(now)
+
+                # TODO Change it into True
+                await self.play(now, add_history=True)
+
+            # TODO Start player, to next song, even found match
+            else:
+                await self.play(self.auto_queue.get(), add_history=True)
 
         added: int = 0
         for track in filtered_r:
@@ -335,7 +291,7 @@ class CustomPlayer(Player):
             track._recommended = True
             added += await self.auto_queue.put_wait(track)
 
-        # TODO Disable caching
+        # TODO Disable shuffle
         # shuffle(self.auto_queue._items)
         logger.debug(
             f'Player "{self.guild.id}" added "{added}" tracks to the auto_queue via AutoPlay.')
@@ -411,10 +367,15 @@ class CustomPlayer(Player):
         if vol != self._volume:
             self._volume = vol
 
+        # TODO Do YTms
+        if isinstance(track, CustomYouTubeMusicPlayable) and not 'lh3' in track.artwork:
+            tmp: Playable = await self.fulfill_youtube_music(track)
+            track._artwork = tmp.artwork
+
         # TODO Do Spotify fulfill if playlist
-        if track.source == 'spotify' and not track.artist.artwork:
+        elif track.source == 'spotify' and not track.artist.artwork:
             tmp: Playable = await self.fulfill_spotify(track)
-            track = tmp
+            track._artist.artwork = tmp.artist.artwork
 
         if replace or not self._current:
             self._current = track
@@ -455,10 +416,10 @@ class CustomPlayer(Player):
             tmp: Playable = await self.fulfill_spotify(track)
             track._isrc = tmp.isrc
 
-        # TODO Reasign track
-        if replace or not self._current:
-            self._current = track
-            self._original = track
+            # TODO Reasign track
+            if replace or not self._current:
+                self._current = track
+                self._original = track
 
         self._paused = pause
 
@@ -468,49 +429,45 @@ class CustomPlayer(Player):
 
         # TODO do recomendation after playing, if auto_queue empty
         if self.autoplay is AutoPlayMode.enabled and self.auto_queue.is_empty:
-            create_task(self._do_recommendation())
+            async with self._auto_lock:
+                await self._do_recommendation()
 
-        # TODO Spotify fullfill
-        async def _cache_fulfill_sp(queue: waveQ):
+        # TODO Caching stuff
+        async def _cache_stuff(queue: Queue):
             cache_limit: int = 3
             if queue.is_empty:
                 return
-            for x in range(cache_limit):
-                try:
-                    if queue.count >= x \
-                            and queue[x].source == 'spotify' \
-                            and not queue[x].artist.artwork:
-                        queue[x] = await self.fulfill_spotify(queue[x])
-                except:
-                    continue
-
-        # TODO ISRC caching
-        async def _cache_isrc(queue: waveQ):
-            cache_limit: int = 3
-            if self.queue.is_empty:
-                return
 
             for x in range(cache_limit):
-                try:
-                    if self.queue.count >= x \
-                            and not queue[x].isrc:
-                        temp: Playable = await self.fulfill_spotify(queue[x])
-                        queue[x]._isrc = temp.isrc
-                except:
-                    continue
+                if queue.count >= x:
+                    try:
+                        # TODO Do YTms and spotify
+                        if isinstance(queue[x], CustomYouTubeMusicPlayable) and not 'lh3' in queue[x].artwork:
+                            tmp: Playable = await self.fulfill_youtube_music(queue[x])
+                            queue[x]._artwork = tmp.artwork
+                        if queue[x].source == 'spotify' and not queue[x].artist.artwork:
+                            tmp: Playable = await self.fulfill_spotify(queue[x])
+                            queue[x]._artist.artwork = tmp.artist.artwork
+                    except:
+                        pass
 
-        # TODO Begin searching next isrc
-        create_task(_cache_isrc(self.queue))
-        create_task(_cache_isrc(self.auto_queue))
+                    try:
+                        # TODO Do isrc
+                        if not queue[x].isrc:
+                            temp: Playable = await self.fulfill_spotify(queue[x])
+                            queue[x]._isrc = temp.isrc
+                    except:
+                        pass
 
-        # TODO Begin fulfill in background
-        create_task(_cache_fulfill_sp(self.queue))
-        create_task(_cache_fulfill_sp(self.auto_queue))
+        # TODO DO caching
+        create_task(_cache_stuff(self.queue)),
+        create_task(_cache_stuff(self.auto_queue))
 
         return track
 
 
 class FiltersTemplate(Enum):
+    DISABLE = 0
     NIGHT_CORE = 1
     VAPOR_WAVE = 2
     BASS_BOOST = 3

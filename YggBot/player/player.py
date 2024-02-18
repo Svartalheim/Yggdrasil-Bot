@@ -257,14 +257,9 @@ class TrackPlayer(TrackPlayerBase):
         embed.set_image(url=track.artwork)
 
         temp: dict = track.__dict__
-        temp.pop('_encoded')
-        temp.pop('_identifier')
-        temp.pop('_is_seekable')
-        temp.pop('_is_stream')
-        temp.pop('_recommended')
-        temp.pop('_extras')
-        temp.pop('_raw_data')
-        temp.pop('_title')
+        del_keys: list[str] = ['_encoded', '_identifier', '_is_seekable', '_is_stream', '_recommended', '_extras', '_raw_data', '_title']
+        for i in del_keys:
+            temp.pop(i)
 
         for key, value in temp.items():
             if isinstance(value, Album):
@@ -287,8 +282,7 @@ class TrackPlayer(TrackPlayerBase):
 
             if not value:
                 continue
-
-            if key == '_length':
+            elif key == '_length':
                 value = duration
             elif key == '_position':
                 value = str(timedelta(seconds=value)).split('.')[0]
@@ -301,7 +295,9 @@ class TrackPlayer(TrackPlayerBase):
             embed.add_field(
                 name=key.removeprefix('_').replace('_', ' ').capitalize(),
                 value=value if not value.startswith(
-                    'http') else f'[here]({value})')
+                    'http') else f'[here]({value})',
+                inline=True
+            )
 
         return embed
 
@@ -344,6 +340,7 @@ class TrackPlayer(TrackPlayerBase):
         player: CustomPlayer = cast(
             CustomPlayer, interaction.user.guild.voice_client)
         filters: Filters = player.filters
+        is_disable: bool = effect is FiltersTemplate.DISABLE
         embed: Embed = Embed(title="💽 Filters applied",
                              color=YggUtil.convert_color(
                                  YggConfig.Color.SUCCESS),
@@ -394,9 +391,9 @@ class TrackPlayer(TrackPlayerBase):
             # TODO Explore filter, setup
             if player.bass_boost_filter:
                 bass_boost: list = [
-                    {'band': 0, 'gain': 0.225},
-                    {'band': 1, 'gain': 0.225},
-                    {'band': 2, 'gain': 0.225}
+                    {'band': 0, 'gain': 0.2},
+                    {'band': 1, 'gain': 0.15},
+                    {'band': 2, 'gain': 0.01}
                 ]
                 filters.equalizer.set(bands=bass_boost)
 
@@ -421,16 +418,15 @@ class TrackPlayer(TrackPlayerBase):
             # TODO Explore filter, setup
             if player.pop_filter:
                 pop: list = [
-                    {'band': 0, 'gain': 0.65},
-                    {'band': 1, 'gain': 0.45},
-                    {'band': 2, 'gain': -0.45},
-                    {'band': 3, 'gain': -0.65},
-                    {'band': 4, 'gain': -0.35},
-                    {'band': 5, 'gain': 0.45},
-                    {'band': 6, 'gain': 0.55},
-                    {'band': 7, 'gain': 0.6},
-                    {'band': 8, 'gain': 0.6},
-                    {'band': 9, 'gain': 0.6},
+                    {'band': 0, 'gain': -0.1},
+                    {'band': 1, 'gain': -0.09},
+                    {'band': 2, 'gain': -0.01},
+                    {'band': 4, 'gain': 0.004},
+                    {'band': 5, 'gain': 0.05},
+                    {'band': 6, 'gain': 0.1},
+                    {'band': 7, 'gain': 0.09},
+                    {'band': 8, 'gain': 0.009},
+                    {'band': 9, 'gain': 0.005},
                 ]
                 filters.equalizer.set(bands=pop)
 
@@ -444,19 +440,13 @@ class TrackPlayer(TrackPlayerBase):
             # TODO Explore filter, setup
             if player.treble_bass:
                 treble_bass: list = [
-                    {'band': 0, 'gain': 0.6},
-                    {'band': 1, 'gain': 0.67},
-                    {'band': 2, 'gain': 0.67},
-                    {'band': 3, 'gain': 0},
-                    {'band': 4, 'gain': -0.5},
-                    {'band': 5, 'gain': 0.15},
-                    {'band': 6, 'gain': -0.45},
-                    {'band': 7, 'gain': 0.23},
-                    {'band': 8, 'gain': 0.35},
-                    {'band': 9, 'gain': 0.45},
-                    {'band': 10, 'gain': 0.55},
-                    {'band': 11, 'gain': 0.6},
-                    {'band': 12, 'gain': 0.55},
+                    {'band': 0, 'gain': 0.2},
+                    {'band': 1, 'gain': 0.15},
+                    {'band': 2, 'gain': 0.01},
+                    {'band': 9, 'gain': 0.01},
+                    {'band': 10, 'gain': 0.025},
+                    {'band': 11, 'gain': 0.05},
+                    {'band': 12, 'gain': 0.1},
                 ]
                 filters.equalizer.set(bands=treble_bass)
 
@@ -464,7 +454,10 @@ class TrackPlayer(TrackPlayerBase):
 
             return player.treble_bass
 
-        if effect is FiltersTemplate.NIGHT_CORE:
+        if is_disable:
+            await player.set_filters(filters)
+
+        elif effect is FiltersTemplate.NIGHT_CORE:
             res = await __filter_nightcore()
             embed.add_field(name="Nightcore", value=res)
 
@@ -488,8 +481,8 @@ class TrackPlayer(TrackPlayerBase):
             res = await __filter_treble_bass()
             embed.add_field(name="Treble bass", value=res)
 
-        if not embed.fields:
-            embed.description = "Nothing to apply"
+        if is_disable:
+            embed.title = "🔻Disabling all effect"
 
         return embed
 

@@ -86,7 +86,8 @@ class TrackView(View):
             if bool(val):
                 embed.add_field(
                     name=f"{str(key).capitalize()} Filter",
-                    value=str(val))
+                    value=str(val)
+                )
 
         embed.set_thumbnail(url=track.artist.artwork)
         embed.set_image(url=self.__player.current.artwork)
@@ -204,7 +205,7 @@ class SelectViewSubtitle(View):
     async def create_embed(self) -> Embed:
         embed: Embed = Embed(color=YggUtil.convert_color(
             YggConfig.Color.FAILED))
-        embed.title = f"🎼 Lyrics of - {self.__playable.title}"
+        embed.title = f"🎼 Lyrics of - {self.__playable.title} | {self.__playable.author}"
         embed.set_author(
             name="LyricFind",
             icon_url="https://www.google.com/s2/favicons?domain={domain}&sz=256".format(
@@ -505,7 +506,7 @@ class QueueView(View):
 
         for track in data:
             count += 1
-            embed.description += f"{count}. **[{YggUtil.truncate_string(track.title)}]({track.uri})** - {UtilTrackPlayer.parse_sec(track.length)}\n"
+            embed.description += f"{count}. **[{YggUtil.truncate_string(f'{track.title} | {track.author}')}]({track.uri})** - {UtilTrackPlayer.parse_sec(track.length)}\n"
 
         return embed
 

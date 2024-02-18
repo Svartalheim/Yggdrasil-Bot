@@ -139,7 +139,7 @@ class Multimedia(commands.Cog, TrackPlayer):
         track: Playlist | Playable = None
         is_playlist = is_queued = False
         embed: Embed = Embed(color=YggUtil.convert_color(
-            YggConfig.Color.FAILED), description="❌ Track not found\nIf you're using link, check if it's supported or not")
+            YggConfig.Color.FAILED))
 
         if isinstance(force_play, Choice):
             force_play = force_play.value
