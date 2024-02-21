@@ -154,7 +154,8 @@ dmypy.json
 cython_debug/
 
 logs/
+plugins/
 Lavalink.jar
 application.yml
-
+Lavalinkv4.jar
 .vscode
