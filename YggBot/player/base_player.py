@@ -1,5 +1,5 @@
 from typing import cast
-from asyncio import gather
+from asyncio import gather, wait, create_task
 from functools import wraps
 
 from discord import (
@@ -256,7 +256,19 @@ class TrackPlayerBase:
 
     @commands.Cog.listener()
     async def on_wavelink_inactive_player(self, player: CustomPlayer) -> None:
-        await player.disconnect()
+        if player.guild.id != YggConfig.KANTIN_YOYOK_ID:
+            embed: Embed = Embed(
+                description="I'm stepping away because I haven't been active for the past hour. \
+                            Feel free to summon me whenever you need, as I'm still here and ready to respond. This helps reduce server load.",
+                color=YggUtil.convert_color(
+                            YggConfig.Color.GENERAL),
+                timestamp=YggUtil.get_time(),
+            )
+            ms: Message = await player.interaction.channel.send(embed=embed)
+            return await wait([
+                create_task(ms.add_reaction("💨")),
+                create_task(player.disconnect()),
+            ])
 
     @commands.Cog.listener()
     async def on_wavelink_track_exception(self, payload: TrackExceptionEventPayload) -> None:
