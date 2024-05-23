@@ -1,5 +1,5 @@
 from typing import cast
-from asyncio import gather, wait, create_task
+from asyncio import gather, create_task, wait
 from functools import wraps
 
 from discord import (
@@ -26,6 +26,8 @@ from wavelink import (
     TrackEndEventPayload,
     TrackExceptionEventPayload
 )
+
+from LyricsFindScrapper import Search as SearchLF
 
 from .interfaces import TrackType, CustomYouTubeMusicPlayable, CustomPlayer
 from .view import TrackView, SelectViewSubtitle
@@ -119,7 +121,7 @@ class TrackPlayerBase:
     _bot: commands.Bot
 
     def __init__(self) -> None:
-        super().__init__()
+        self.__lf_client = SearchLF(session=self._bot.session)
 
     async def _custom_wavelink_searcher(self, query: str, track_type: TrackType, is_search: bool = False) -> Playable | Playlist:
         """Will return either List of tracks or Single Tracks"""
@@ -162,7 +164,8 @@ class TrackPlayerBase:
             tracks = tracks[0]
 
             if track_type is TrackType.YOUTUBE_MUSIC:
-                tracks = CustomYouTubeMusicPlayable(data=tracks.raw_data, playlist=tracks.playlist)
+                tracks = CustomYouTubeMusicPlayable(
+                    data=tracks.raw_data, playlist=tracks.playlist)
 
         return tracks
 
@@ -171,7 +174,7 @@ class TrackPlayerBase:
         embed: Embed = Embed(color=YggUtil.convert_color(
             YggConfig.Color.SUCCESS))
         embed.set_footer(
-            text=f'From {member.name} ', icon_url=member.display_avatar)
+            text=f'From {member.display_name} ', icon_url=member.display_avatar)
 
         if is_playlist:
             embed.description = f"✅ Queued {'(on front)' if is_put_front else ''} - {len(tracks)} \
@@ -196,7 +199,7 @@ class TrackPlayerBase:
             YggConfig.Color.FAILED))
 
         view: View = SelectViewSubtitle(
-            self._bot.session, player._original, interaction)
+            self.__lf_client, player._original, interaction)
         embed: Embed = await view.create_embed()
 
         return (embed, view)
@@ -204,7 +207,6 @@ class TrackPlayerBase:
     async def _update_player(self, interaction: Interaction) -> None:
         player: CustomPlayer = cast(
             CustomPlayer, interaction.guild.voice_client)
-        interaction: Interaction = player.interaction
 
         if player:
             message: Message = player.message
@@ -219,19 +221,24 @@ class TrackPlayerBase:
     @commands.Cog.listener()
     async def on_wavelink_node_ready(self, payload: NodeReadyEventPayload) -> None:
         YggUtil.simple_log(
-            f"Node {payload.node.session_id}, {payload.node.heartbeat} is ready!")
+            f"Node {payload.node.session_id}, heartbeat {payload.node.heartbeat} is ready!")
+        info = await payload.node.fetch_info()
+        version = await payload.node.fetch_version()
+        YggUtil.simple_log(
+            f"Node version {version}, active source {info.source_managers}, active plugins {[x.name for x in info.plugins]}"
+        )
 
     @commands.Cog.listener()
     async def on_wavelink_track_start(self, payload: TrackStartEventPayload) -> None:
         player:  CustomPlayer = payload.player
         interaction: Interaction = player.interaction
         channel: TextChannel = interaction.channel
-        message: Message = None
+        message: Message
 
         view: TrackView = TrackView(self, player)
         embed: Embed = view.get_embed
 
-        # Wait message until sended
+        # TODO Wait message until sended
         res: list = await gather(channel.send(embed=embed))
         message: Message = res[0]
 
@@ -247,6 +254,7 @@ class TrackPlayerBase:
 
     @commands.Cog.listener()
     async def on_wavelink_websocket_closed(self, payload: WebsocketClosedEventPayload) -> None:
+
         player: CustomPlayer = payload.player
         if player and player.playing:
             await player.message.delete()
@@ -275,7 +283,7 @@ class TrackPlayerBase:
         player: CustomPlayer = cast(CustomPlayer, payload.player)
 
         embed: Embed = Embed(
-            title="💥Something went wrong, while playing the track!",
+            title="💥 Something went wrong, while playing the track!",
             description=f'```arm\n{payload.exception}\n```',
             color=YggUtil.convert_color(YggConfig.Color.FAILED),
             timestamp=YggUtil.get_time()

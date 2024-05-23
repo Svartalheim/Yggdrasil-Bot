@@ -16,14 +16,14 @@ from discord.ui import (
 )
 from discord.errors import NotFound
 
-from aiohttp import ClientSession
-
 from wavelink import (
     QueueEmpty,
     Queue,
     Playable,
     QueueMode
 )
+
+from iso639 import Lang
 
 from LyricsFindScrapper import Search as SearchLF, Track, SongData, Translation, LFException
 
@@ -67,7 +67,8 @@ class TrackView(View):
         embed = Embed(
             title="🎶 Now Playing",
             color=YggUtil.convert_color(YggConfig.Color.GENERAL),
-            description=f"**[{track.title} | {track.author}]({track.uri})** - **{UtilTrackPlayer.parse_sec(track.length)}**",
+            description=f"**[{track.title} | {track.author}]({track.uri})** - **{
+                UtilTrackPlayer.parse_sec(track.length)}**",
             timestamp=interaction.created_at
         )
 
@@ -92,7 +93,7 @@ class TrackView(View):
         embed.set_thumbnail(url=track.artist.artwork)
         embed.set_image(url=self.__player.current.artwork)
         embed.set_footer(
-            text=f'Last control from {interaction.user.name}', icon_url=interaction.user.display_avatar)
+            text=f'Last control from {interaction.user.display_name}', icon_url=interaction.user.display_avatar)
 
         return embed
 
@@ -148,6 +149,13 @@ class TrackView(View):
             create_task(self.__track_control.previous(interaction))
         ])
 
+    @button(label="5s", emoji="◀️", style=ButtonStyle.gray)
+    async def _back(self, interaction: Interaction, _) -> None:
+        await wait([
+            create_task(interaction.response.defer()),
+            create_task(self.__track_control.skip(interaction, seconds=-5))
+        ])
+
     @button(label="Pause", emoji="⏸️", style=ButtonStyle.blurple)
     async def _pause(self, interaction: Interaction, _) -> None:
         await interaction.response.defer()
@@ -165,6 +173,13 @@ class TrackView(View):
         await wait([
             create_task(interaction.response.defer()),
             create_task(self.__track_control.stop(interaction))
+        ])
+
+    @button(label="5s", emoji="▶️", style=ButtonStyle.gray)
+    async def _skip(self, interaction: Interaction, _) -> None:
+        await wait([
+            create_task(interaction.response.defer()),
+            create_task(self.__track_control.skip(interaction, seconds=5))
         ])
 
     @button(label="Next", emoji="⏭️", style=ButtonStyle.secondary)
@@ -185,8 +200,8 @@ class TrackView(View):
 
 class SelectViewSubtitle(View):
 
-    def __init__(self, session: ClientSession, playable: Playable, interaction: Interaction, /, *, timeout: float | None = 180):
-        self.__lf_client: SearchLF = SearchLF(session=session)
+    def __init__(self, lf_client: SearchLF, playable: Playable, interaction: Interaction, /, *, timeout: float | None = 180):
+        self.__lf_client: SearchLF = lf_client
         self.__interaction: Interaction = interaction
         self.__playable: Playable = playable
 
@@ -205,7 +220,8 @@ class SelectViewSubtitle(View):
     async def create_embed(self) -> Embed:
         embed: Embed = Embed(color=YggUtil.convert_color(
             YggConfig.Color.FAILED))
-        embed.title = f"🎼 Lyrics of - {self.__playable.title} | {self.__playable.author}"
+        embed.title = f"🎼 Lyrics of - {
+            self.__playable.title} | {self.__playable.author}"
         embed.set_author(
             name="LyricFind",
             icon_url="https://www.google.com/s2/favicons?domain={domain}&sz=256".format(
@@ -219,6 +235,7 @@ class SelectViewSubtitle(View):
 
             if not self.__lyrics or (self.__target_lang and self.__target_lang == self.__available_lang[0]):
                 song_data: SongData = await self.__lf_client.get_lyrics(track=self.__track)
+
                 if not self.__available_lang:
                     self.__available_lang.append(song_data.language)
                     if song_data.available_translations:
@@ -230,13 +247,23 @@ class SelectViewSubtitle(View):
 
                 self.__lyrics = song_data.lyrics
         except (LFException, Exception) as e:
-            embed.description = f'```arm\n{e}\n```'
+            if e.http_code == 202:
+                embed.description = f'```arm\nTrack was not found in LyricFind!!\n```'
+            else:
+                embed.description = f'```arm\n{e}\n```'
+                
             self.clear_items()
             return embed
 
         self.__pass_data_to_option()
-        embed.title = f"🎼 Lyrics of {self.__track.title} - {self.__track.artist}"
-        embed.description = self.__lyrics
+        embed.title = f"🎼 Lyrics of {
+            self.__track.title} - {self.__track.artist}"
+
+        max_lyric: int = 4096
+        embed.description = self.__lyrics[:max_lyric - 256] + \
+            f"[...](https://lyrics.lyricfind.com/lyrics/{self.__track.slug})" if len(
+                self.__lyrics) > max_lyric else self.__lyrics + f"\n\n[origin](https://lyrics.lyricfind.com/lyrics/{self.__track.slug})"
+
         embed.color = YggUtil.convert_color(YggConfig.Color.GENERAL)
 
         return embed
@@ -260,7 +287,7 @@ class SelectViewSubtitle(View):
                 desc = "Current language"
 
             self._selector.append_option(SelectOption(
-                label=lang[0].upper(),
+                label=Lang(lang[0]).name.capitalize(),
                 emoji=lang[1],
                 description=desc,
                 value=str(index)
@@ -285,7 +312,7 @@ class SelectViewSubtitle(View):
     async def _selector(self, interaction: Interaction, select: Select) -> None:
         await interaction.response.defer()
         self.__target_lang = self.__available_lang[int(select.values[0])]
-
+        
         if self.__target_lang != self.__available_lang[0]:
             tl: Translation = await self.__lf_client.get_translation(self.__track, self.__target_lang[0])
             self.__lyrics = tl.translation
@@ -380,7 +407,8 @@ class SelectViewTrack(View):
         self._last_page_button.disabled = True
 
         self._selector.disabled = True
-        self._selector.placeholder = f"{self._selector.options[int(self._selector.values[0]) - index].emoji} {self._selector.options[int(self._selector.values[0]) - index].label}"
+        self._selector.placeholder = f"{self._selector.options[int(self._selector.values[0]) - index].emoji} {
+            self._selector.options[int(self._selector.values[0]) - index].label}"
         self._cancel_button.disabled = True
 
     def __update_buttons(self):
@@ -499,14 +527,16 @@ class QueueView(View):
 
         total_pages: int = self.__max_pages()
         embed: Embed = Embed(
-            title=f"📃 Queue {'history' if self.__is_history else ''} - Page {self.__current_page} of {total_pages}",
+            title=f"📃 Queue { \
+                'history' if self.__is_history else ''} - Page {self.__current_page} of {total_pages}",
             color=YggUtil.convert_color(YggConfig.Color.GENERAL))
         count: int = (self.__current_page-1) * self.SHOW_LIMIT
         embed.description = str()
 
         for track in data:
             count += 1
-            embed.description += f"{count}. **[{YggUtil.truncate_string(f'{track.title} | {track.author}')}]({track.uri})** - {UtilTrackPlayer.parse_sec(track.length)}\n"
+            embed.description += f"{count}. **[{YggUtil.truncate_string(f'{track.title} | {track.author}')}]({ \
+                track.uri})** - {UtilTrackPlayer.parse_sec(track.length)}\n"
 
         return embed
 

@@ -15,7 +15,7 @@ from wavelink import (
     PlaylistInfo,
     Filters
 )
-from .interfaces import CustomPlayer, TrackType, FiltersTemplate
+from .interfaces import CustomPlayer, TrackType, FiltersTemplate, TrackPlayerInterface
 from .util_player import UtilTrackPlayer
 from .base_player import TrackPlayerBase, TrackPlayerDecorator
 from .view import QueueView, SelectViewTrack
@@ -109,7 +109,7 @@ class TrackPlayer(TrackPlayerBase):
                 await player.seek(player.current.length * 1000)
             elif not player.playing:
                 trck: Playable = await player.queue.get_wait()
-                await player.play(trck)
+                await player.play(trck, populate=(autoplay is True))
 
             is_playlist = True
         elif player.playing:
@@ -126,7 +126,7 @@ class TrackPlayer(TrackPlayerBase):
 
             is_queued = True
         else:
-            await player.play(tracks)
+            await player.play(tracks, populate=(autoplay is True))
 
         return (tracks, is_playlist, is_queued)
 
@@ -143,11 +143,15 @@ class TrackPlayer(TrackPlayerBase):
         return (embed, view)
 
     @TrackPlayerDecorator.record_interaction()
-    async def skip(self, interaction: Interaction, index: int = None) -> None:
+    async def skip(self, interaction: Interaction, index: int = None, seconds: int = None) -> None:
         player: CustomPlayer = cast(
             CustomPlayer, interaction.user.guild.voice_client)
+        
+        if seconds:
+            await player.seek(player.position + (seconds * 1000))
+            return
 
-        if index is not None:
+        if index:
             track: Playable = None
 
             if index < player.queue.count:
@@ -209,12 +213,7 @@ class TrackPlayer(TrackPlayerBase):
             player.queue.reset()
             player.auto_queue.reset()
 
-        player.filters.reset()
-
         await player.stop()
-
-        # TODO Reset inner work
-        player.reset_inner_work()
 
     @TrackPlayerDecorator.record_interaction()
     def clear(self, interaction: Interaction) -> None:
@@ -236,11 +235,11 @@ class TrackPlayer(TrackPlayerBase):
         player.queue.shuffle()
 
     def now_playing(self, interaction: Interaction) -> Embed:
-        player: CustomPlayer = cast(
-            CustomPlayer, interaction.user.guild.voice_client)
-        track: Playable = player._original
-        time: int = (player.current.length - player.position)//1000
-        duration: str = UtilTrackPlayer.parse_sec(player.current.length)
+        player: CustomPlayer = interaction.guild.voice_client
+
+        track: Playable = player.current
+        time: int = (track.length - player.position)//1000
+        duration: str = UtilTrackPlayer.parse_sec(track.length)
 
         embed: Embed = Embed(
             title="🎶 Now Playing",
@@ -256,8 +255,9 @@ class TrackPlayer(TrackPlayerBase):
         embed.set_thumbnail(url=track.artist.artwork)
         embed.set_image(url=track.artwork)
 
-        temp: dict = track.__dict__
-        del_keys: list[str] = ['_encoded', '_identifier', '_is_seekable', '_is_stream', '_recommended', '_extras', '_raw_data', '_title']
+        temp: dict = track.__dict__.copy()
+        del_keys: list[str] = ['_encoded', '_identifier', '_is_seekable',
+                               '_is_stream', '_recommended', '_extras', '_raw_data', '_title']
         for i in del_keys:
             temp.pop(i)
 
@@ -267,9 +267,9 @@ class TrackPlayer(TrackPlayerBase):
                     continue
 
                 if not value.url:
-                    value = value.name
+                    value = value.name[:150]
                 else:
-                    value = f'[{value.name}]({value.url})'
+                    value = f'[{value.name[:150]}]({value.url})...'
             elif isinstance(value, Artist):
                 if not value.url:
                     continue
@@ -314,9 +314,6 @@ class TrackPlayer(TrackPlayerBase):
         else:
             player.queue.mode = QueueMode.normal
             loop = False
-
-        if player.queue.mode is QueueMode.loop:
-            player.queue.loaded = player.current
 
         return loop
 

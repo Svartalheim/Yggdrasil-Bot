@@ -1,10 +1,10 @@
-FROM python:3.11-slim
+FROM python:3.12-alpine
 
 # Install git
-RUN apt-get update && apt-get install -y git
+RUN apk update && apk add git && rm -rf /var/cache/apk/*
 
 COPY . /app
 WORKDIR /app
-RUN pip3 install -Ur requirements.txt
+RUN pip install -U -r requirements.txt --no-dependencies
 
-CMD ["python3", "main.py"]
+CMD ["python", "main.py"]

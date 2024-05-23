@@ -6,8 +6,6 @@ from logging import (
     StreamHandler
 )
 
-from pytz import timezone
-
 from discord import (
     Embed,
     Emoji,
@@ -18,6 +16,7 @@ from discord import (
 )
 from discord.utils import _ColourFormatter
 from discord.ui import View
+from pytz import timezone
 
 from config import YggConfig
 
@@ -25,12 +24,12 @@ from config import YggConfig
 class YggUtil:
 
     @staticmethod
-    def convert_color(color: str) -> int:
-        return int(color.lstrip("#"), 16)
-
-    @staticmethod
     def get_time() -> datetime:
         return datetime.now(timezone(YggConfig.TIMEZONE))
+
+    @staticmethod
+    def convert_color(color: str) -> int:
+        return int(color.lstrip('#'), 16)
 
     @staticmethod
     def truncate_string(text: str, /, max: int = 150) -> str:
@@ -53,24 +52,15 @@ class YggUtil:
         logger.info(message)
 
     @staticmethod
-    async def send_response(
-        interaction: Interaction,
-        /,
-        message: str = None,
-        embed: Embed = None,
-        emoji: Emoji | str = None,
-        view: View = None,
-        ephemeral: bool = False,
-    ) -> Message:
+    async def send_response(interaction: Interaction, /,
+                            message: str = None, embed: Embed = None, emoji: Emoji | str = None, view: View = None, ephemeral: bool = False) -> Message:
         msg: Message = None
         temp: str = str()
 
         if not view:
             view = View()
 
-        def change_emoji(
-            message: str, emoji: Emoji | str, ephemeral: bool = False
-        ) -> str:
+        def change_emoji(message: str, emoji: Emoji | str, ephemeral: bool = False) -> str:
             if isinstance(emoji, str) and ephemeral:
                 return f"{emoji} {message}"
 
@@ -81,9 +71,7 @@ class YggUtil:
 
         try:
             temp = change_emoji(message, emoji, ephemeral)
-            await interaction.response.send_message(
-                temp, embed=embed, ephemeral=ephemeral, view=view
-            )
+            await interaction.response.send_message(temp, embed=embed, ephemeral=ephemeral, view=view)
             msg = await interaction.original_response()
         except InteractionResponded:
             msg = await interaction.original_response()
@@ -92,9 +80,7 @@ class YggUtil:
 
             temp = change_emoji(message, emoji, ephemeral)
 
-            msg = await interaction.followup.send(
-                temp, embed=embed, ephemeral=ephemeral, view=view, wait=True
-            )
+            msg = await interaction.followup.send(temp, embed=embed, ephemeral=ephemeral, view=view, wait=True)
 
         if emoji and not ephemeral:
             await msg.add_reaction(emoji)

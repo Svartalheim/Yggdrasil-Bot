@@ -464,6 +464,13 @@ class Multimedia(commands.Cog, TrackPlayer):
 
     async def cog_app_command_error(self, interaction: Interaction, error: AppCommandError) -> None:
         if not isinstance(error, CheckFailure):
-            await YggUtil.send_response(interaction, message=f"Unknown error, {Exception(error)}. Error on line {exc_info()[-1].tb_lineno}, {type(Exception).__name__, Exception}", emoji="❓")
+            embed: Embed = Embed(
+                title="⁉️ Unknown error",
+                description=f'```arm\nUnknown error, {Exception(error)}. Error on line {exc_info()[-1].tb_lineno}, {type(Exception).__name__, Exception}\n```',
+                color=YggUtil.convert_color(
+                    YggConfig.Color.FAILED),
+                timestamp=YggUtil.get_time()
+            )
+            await YggUtil.send_response(interaction, embed=embed)
 
         return await super().cog_app_command_error(interaction, error)
