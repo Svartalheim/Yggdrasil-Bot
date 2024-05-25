@@ -15,7 +15,7 @@ from wavelink import (
     PlaylistInfo,
     Filters
 )
-from .interfaces import CustomPlayer, TrackType, FiltersTemplate, TrackPlayerInterface
+from .interfaces import CustomPlayer, TrackType, FiltersTemplate
 from .util_player import UtilTrackPlayer
 from .base_player import TrackPlayerBase, TrackPlayerDecorator
 from .view import QueueView, SelectViewTrack
@@ -146,7 +146,7 @@ class TrackPlayer(TrackPlayerBase):
     async def skip(self, interaction: Interaction, index: int = None, seconds: int = None) -> None:
         player: CustomPlayer = cast(
             CustomPlayer, interaction.user.guild.voice_client)
-        
+
         if seconds:
             await player.seek(player.position + (seconds * 1000))
             return
@@ -238,13 +238,13 @@ class TrackPlayer(TrackPlayerBase):
         player: CustomPlayer = interaction.guild.voice_client
 
         track: Playable = player.current
-        time: int = (track.length - player.position)//1000
+        time: int = track.length - player.position
         duration: str = UtilTrackPlayer.parse_sec(track.length)
 
         embed: Embed = Embed(
             title="🎶 Now Playing",
-            description=f"""**[{track.title}]({track.uri}) - {duration}** 
-            \n** {str(timedelta(seconds=time)).split('.')[0]} left**""",
+            description=f"""**[{track.title}]({track.uri}) - {duration}**
+            \n** {UtilTrackPlayer.parse_sec(time, show_suffix=False)} left**""",
             color=YggUtil.convert_color(YggConfig.Color.GENERAL)
         )
 
@@ -292,12 +292,15 @@ class TrackPlayer(TrackPlayerBase):
             elif key == '_uri':
                 key = 'url'
 
+            val: str = value if not value.startswith(
+                'http') else f'[here]({value})'
+
             embed.add_field(
                 name=key.removeprefix('_').replace('_', ' ').capitalize(),
-                value=value if not value.startswith(
-                    'http') else f'[here]({value})',
+                value=val.removeprefix('_').replace('_', ' ').capitalize(),
                 inline=True
             )
+            embed.set_footer(text="Data may be inaccurate.")
 
         return embed
 

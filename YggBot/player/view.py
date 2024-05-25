@@ -90,7 +90,7 @@ class TrackView(View):
                     value=str(val)
                 )
 
-        embed.set_thumbnail(url=track.artist.artwork)
+        embed.set_thumbnail(url=track.artist.artwork if track.source != "youtube" else None)
         embed.set_image(url=self.__player.current.artwork)
         embed.set_footer(
             text=f'Last control from {interaction.user.display_name}', icon_url=interaction.user.display_avatar)

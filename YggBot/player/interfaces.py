@@ -1,4 +1,4 @@
-from asyncio import gather, create_task
+from asyncio import gather, create_task, Lock
 from random import shuffle
 from enum import Enum
 from typing import TypeAlias
@@ -70,6 +70,9 @@ class CustomPlayer(Player):
         self.soft_filter: bool = False
         self.pop_filter: bool = False
         self.treble_bass: bool = False
+
+        self.queue_lock = Lock()
+        self.auto_queue_lock = Lock()
     # TODO Reset filter
 
     def reset_filter(self) -> None:
@@ -109,43 +112,44 @@ class CustomPlayer(Player):
             'treble bass': self.treble_bass
         })
 
-    # TODO Fulfill ytms stuff
-    async def fulfill_youtube_music(self, playable: Playable) -> Playable:
-        try:
-            def __clean_official(query: str):
-                query = sub(r'\s*\(.*?\)', '', playable.title)
-                return query.strip()
+    # TODO clean unused text
+    @staticmethod
+    def __clean_unused(text: str):
+        text = sub(
+            r'\b(?:official|vevo|video|audio|- topic)\b|[^a-zA-Z\s]', '', text)
+        return text.strip()
 
-            trck: list[Playable] = await Pool.fetch_tracks(f'ytmsearch:{__clean_official(playable.title)} {playable.author}')
+    # TODO Fulfill ytms stuff
+    # Link uri approcah is imppossible, uri doesnt always have same link
+    async def fulfill_youtube_music(self, playable: Playable) -> Playable:
+        print(playable.uri)
+
+        try:
+            trck: list[Playable] = await Pool.fetch_tracks(f'ytmsearch:{self.__clean_unused(playable.title)} {self.__clean_unused(playable.author)}')
             playable = next(
                 (x for x in trck
                  if x.author.lower() in playable.author.lower()
                  and x.title.lower() in playable.title.lower()), playable)
 
-            if "lh3" not in playable.artwork:
+            if not 'lh3' in playable.artwork:
                 temp: list[Playable] = await Pool.fetch_tracks(playable.uri)
                 playable = temp[0]
 
-        except IndexError:
+        except:
             pass
 
         return CustomYouTubeMusicPlayable(data=playable.raw_data, playlist=playable.playlist)
 
     # TODO Fulfill spotify info empty
     async def fulfill_spotify(self, playable: Playable) -> Playable:
-        try:
 
+        try:
             if playable.source == 'spotify':
                 conv: list[Playable] = await Pool.fetch_tracks(playable.uri)
             else:
-                def __clean_official(query: str):
-                    query = sub(r'\s*\(.*?\)', '', playable.title)
-                    return query.strip()
+                conv: list[Playable] = await Pool.fetch_tracks(f'spsearch:{self.__clean_unused(playable.title)} {self.__clean_unused(playable.author)}')
 
-                conv: list[Playable] = await Pool.fetch_tracks(f'spsearch:{__clean_official(playable.title)} {playable.author}')
-
-            conv = conv[0]
-            return conv
+            return conv[0]
         except:
             return playable
 
@@ -405,23 +409,40 @@ class CustomPlayer(Player):
         if vol != self._volume:
             self._volume = vol
 
+        task: list = list()
+
+        # TODO search isrc and required things
+        if not track.isrc or not track.artist.artwork or not track.album or track.source == 'spotify':
+            task.append(create_task(self.fulfill_spotify(track)))
+
         # TODO Reqeuest straight to url, if its yotube
         if track.source == 'youtube':
+            was_ytms: bool = isinstance(track, CustomYouTubeMusicPlayable)
+            if was_ytms and not 'lh3' in track.artwork:
+                task.append(create_task(self.fulfill_youtube_music(track)))
 
-            # TODO Do this, if it's youtube
-            if isinstance(track, CustomYouTubeMusicPlayable):
-                temp: Playable = await self.fulfill_youtube_music(track)
+            if not was_ytms and 'maxres' not in track.artwork:
+                task.append(create_task(Pool.fetch_tracks(track.uri)))
 
-            else:
-                temp: list[Playable] = await Pool.fetch_tracks(track.uri)
-                temp: Playable = temp[0]
+        # TODO Check if need to run task
+        spot: Playable = None
+        for x in await gather(*task):
+            try:
+                if isinstance(x, list):
+                    x: Playable = x[0]
 
-            track = temp
+                if x.source == 'spotify':
+                    spot = x
+                else:
+                    track = x
+            except:
+                pass
 
-        # TODO Do Spotify fulfill if playlist(to get the artwork)
-        elif track.source == 'spotify' and not track.artist.artwork:
-            tmp: Playable = await self.fulfill_spotify(track)
-            track._artist.artwork = tmp.artist.artwork
+        # TODO Assign new info
+        if spot:
+            track._isrc = spot.isrc
+            track._artist.artwork = spot.artist.artwork
+            track._album = spot.album
 
         if replace or not self._current:
             self._current = track
@@ -455,32 +476,6 @@ class CustomPlayer(Player):
             self._volume = original_vol
             raise e
 
-        # TODO Find isrc
-        if not track.isrc:
-            tmp: Playable = await self.fulfill_spotify(track)
-            track._isrc = tmp.isrc
-
-            # TODO also, add artist thumbnail and album name
-            track._artist.artwork = tmp.artist.artwork
-            track._album.name = tmp.album.name
-
-            # TODO Assign isrc and artist thumbnail to current and previous etc
-            self._current._isrc = tmp.isrc
-            self._current._artist.artwork = tmp.artist.artwork
-            self._current._album.name = tmp.album.name
-
-            self._original._isrc = tmp.isrc
-            self._original._artist.artwork = tmp.artist.artwork
-            self._original._album.name = tmp.album.name
-
-            self.queue._loaded._isrc = tmp.isrc
-            self.queue._loaded._artist.artwork = tmp.artist.artwork
-            self.queue._loaded._album.name = tmp.album.name
-
-            self._previous._isrc = tmp.isrc
-            self._previous._artist.artwork = tmp.artist.artwork
-            self._previous._album.name = tmp.album.name
-
         self._paused = pause
 
         if add_history:
@@ -498,37 +493,44 @@ class CustomPlayer(Player):
     # TODO Caching logic
     async def do_caching_stuff(self) -> None:
         # TODO Caching stuff
-        async def _cache_stuff(queue: Queue):
-            cache_limit: int = 5
-            if queue.is_empty:
-                return
+        async def _cache_stuff(queue: Queue, lock: Lock):
+            async with lock:
+                cache_limit: int = 5
+                if queue.is_empty:
+                    return
 
-            for x in range(cache_limit):
-                if queue.count >= (x+1):
-                    # TODO Request to spotify once
-                    temp_spot: Playable
-                    try:
-                        temp_spot: Playable = await self.fulfill_spotify(queue[x])
-                    except:
-                        pass
+                for x in range(cache_limit):
+                    task: list = list()
 
-                    # TODO Do isrc
-                        if temp_spot and not queue[x].isrc:
-                            queue[x]._isrc = temp_spot.isrc
+                    if queue.count >= (x+1):
+                        # TODO Do required task
+                        if queue[x].isrc and queue[x].artist.artwork:
+                            task.append(create_task(
+                                self.fulfill_spotify(queue[x])))
 
-                    try:
-                        # TODO Do YTms and spotify
                         if isinstance(queue[x], CustomYouTubeMusicPlayable) and 'lh3' not in queue[x].artwork:
-                            tmp: Playable = await self.fulfill_youtube_music(queue[x])
-                            queue[x]._artwork = tmp.artwork
-                        elif queue[x].source == 'spotify' and not queue[x].artist.artwork:
+                            task.append(create_task(
+                                self.fulfill_youtube_music(queue[x])))
+
+                        # TODO gather task, and assign it
+                        temp_spot: Playable = None
+                        for a in await gather(*task):
+                            try:
+                                if a.source == 'spotify':
+                                    temp_spot = a
+                                else:
+                                    queue[x] = a
+                            except:
+                                pass
+
+                        if temp_spot:
+                            queue[x]._isrc = temp_spot.isrc
                             queue[x]._artist.artwork = temp_spot.artist.artwork
-                    except:
-                        pass
+                            queue[x]._album = temp_spot.album
 
         # TODO Do caching
-        create_task(_cache_stuff(self.queue))
-        create_task(_cache_stuff(self.auto_queue))
+        create_task(_cache_stuff(self.queue, self.queue_lock))
+        create_task(_cache_stuff(self.auto_queue, self.auto_queue_lock))
 
     # TODO Custom stop
     async def stop(self, *, force: bool = True) -> Playable | None:
