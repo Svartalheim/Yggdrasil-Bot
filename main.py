@@ -35,12 +35,12 @@ class YggTask:
                 YggUtil.simple_log(
                     "Host and Password length must match. Please check your config, make sure it divided by ','. Fallback into using one node")
                 temp.append(Node(uri=server[0], password=server_pass[0],
-                            inactive_player_timeout=inactive_timeout, retries=3))
+                            inactive_player_timeout=inactive_timeout))
                 return temp
 
             for s, p in zip(server, server_pass):
                 temp.append(
-                    Node(uri=s, password=p, inactive_player_timeout=inactive_timeout, retries=3))
+                    Node(uri=s, password=p, inactive_player_timeout=inactive_timeout))
 
             return temp
 
