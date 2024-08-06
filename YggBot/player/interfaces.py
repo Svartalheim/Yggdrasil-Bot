@@ -84,6 +84,7 @@ class CustomPlayer(Player):
         self.rotation_filter: bool = False
         self.tremolo_filter: bool = False
         self.vibrato_filter: bool = False
+        self.normalization_filter: bool = False
 
         # TODO Filter template list
         self.nigthcore_filter: bool = False
@@ -112,7 +113,8 @@ class CustomPlayer(Player):
             'bass boost': self.bass_boost_filter,
             'soft': self.soft_filter,
             'pop': self.pop_filter,
-            'treble bass': self.treble_bass
+            'treble bass': self.treble_bass,
+            'normalization': self.normalization_filter or self.normal_default
         })
 
     # TODO clean unused text
