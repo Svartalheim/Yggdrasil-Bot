@@ -405,7 +405,8 @@ class Multimedia(commands.Cog, TrackPlayer):
     @describe(karaoke="Karaoke effect",
               rotation="Rotation effect(8D Audio)",
               tremolo="Tremolo effect(Electric guitar effect)",
-              vibrato="Vibrato effect")
+              vibrato="Vibrato effect",
+              normalization="Volume normalization(Enabled by default)")
     @choices(karaoke=[
         Choice(name='True', value=1),
         Choice(name='False', value=0)],
@@ -417,16 +418,20 @@ class Multimedia(commands.Cog, TrackPlayer):
         Choice(name='False', value=0)],
         vibrato=[
         Choice(name='True', value=1),
+        Choice(name='False', value=0)],
+        normalization=[
+        Choice(name='True', value=1),
         Choice(name='False', value=0)])
     @TrackPlayerDecorator.is_client_exist()
     @TrackPlayerDecorator.is_user_allowed()
     @TrackPlayerDecorator.is_playing()
-    async def _filters(self, interaction: Interaction, karaoke: Choice[int] = 0, rotation: Choice[int] = 0, tremolo: Choice[int] = 0, vibrato: Choice[int] = 0) -> None:
+    async def _filters(self, interaction: Interaction, karaoke: Choice[int] = 0, rotation: Choice[int] = 0, tremolo: Choice[int] = 0, vibrato: Choice[int] = 0, normalization: Choice[int] = 0) -> None:
         await interaction.response.defer()
         conv_karak: bool = None
         conv_rotat: bool = None
         conv_tremo: bool = None
         conv_vibra: bool = None
+        conv_norma: bool = None
 
         if isinstance(karaoke, Choice):
             conv_karak = bool(karaoke.value)
@@ -440,10 +445,13 @@ class Multimedia(commands.Cog, TrackPlayer):
         if isinstance(vibrato, Choice):
             conv_vibra = bool(vibrato.value)
 
-        embed: Embed = await self.filters(interaction, karaoke=conv_karak, rotation=conv_rotat, tremolo=conv_tremo, vibrato=conv_vibra)
+        if isinstance(normalization, Choice):
+            conv_norma = bool(normalization.value)
+
+        embed: Embed = await self.filters(interaction, karaoke=conv_karak, rotation=conv_rotat, tremolo=conv_tremo, vibrato=conv_vibra, normalization=conv_norma)
 
         await wait([
-            create_task(YggUtil.send_response(interaction, embed=embed)),
+            create_task(ModularUtil.send_response(interaction, embed=embed)),
             create_task(self._update_player(interaction=interaction))
         ])
 

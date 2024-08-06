@@ -24,10 +24,27 @@ class YggTask:
         await bot.wait_until_ready()
         inactive_timeout: int = timedelta(minutes=30).total_seconds()
 
-        nodes: list[Node] = [Node(uri=YggConfig.LAVALINK_SERVER,
-                                  password=YggConfig.LAVALINK_PASSWORD, inactive_player_timeout=inactive_timeout)]
+        def get_lavalink_nodes() -> list[Node]:
+            temp: list[Node] = list()
 
-        await Pool.connect(nodes=nodes, client=bot, cache_capacity=20)
+            server: list[str] = YggConfig.LAVALINK_SERVER.split(',')
+            server_pass: list[str] = YggConfig.LAVALINK_PASSWORD.split(
+                ',')
+
+            if len(server) != len(server_pass):
+                YggUtil.simple_log(
+                    "Host and Password length must match. Please check your config, make sure it divided by ','. Fallback into using one node")
+                temp.append(Node(uri=server[0], password=server_pass[0],
+                            inactive_player_timeout=inactive_timeout, retries=3))
+                return temp
+
+            for s, p in zip(server, server_pass):
+                temp.append(
+                    Node(uri=s, password=p, inactive_player_timeout=inactive_timeout, retries=3))
+
+            return temp
+
+        await Pool.connect(nodes=get_lavalink_nodes(), client=bot, cache_capacity=20)
 
     @tasks.loop(seconds=60)
     async def _change_activity(self: commands.Bot) -> None:
@@ -100,7 +117,8 @@ class YggBase(commands.Bot):
         embed.set_author(name=self.user.name,
                          icon_url=self.user.display_avatar)
         embed.set_footer(
-            text=f" © {bot_name} • Still under develop, if there is something wrong contact @svartalheim"
+            text=f" © {
+                bot_name} • Still under develop, if there is something wrong contact @svartalheim"
         )
         return embed
 
@@ -128,7 +146,8 @@ class YggClient(YggBase, YggTask):
 
     async def on_ready(self) -> None:
         YggUtil.simple_log(
-            f"Logged as {self.user.name}, {self.user.id}, Member count: {len([x for x in self.get_all_members()])}"
+            f"Logged as {self.user.name}, {self.user.id}, Member count: {
+                len([x for x in self.get_all_members()])}"
         )
 
         if not self.synced:
@@ -150,7 +169,8 @@ async def _help(interaction: Interaction) -> None:
     if interaction.guild.me.nick is None:
         bot_name = interaction.guild.me.name
     else:
-        bot_name = f"{interaction.guild.me.name} AKA {interaction.guild.me.nick}"
+        bot_name = f"{interaction.guild.me.name} AKA {
+            interaction.guild.me.nick}"
     await YggUtil.send_response(
         interaction,
         embed=await bot._help_embed(

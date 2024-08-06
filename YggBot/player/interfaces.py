@@ -57,11 +57,14 @@ class CustomPlayer(Player):
         self.interaction: Interaction = None
         self.message: Message = None
 
+        self.normal_default: bool = True
+
         # TODO Filter list
         self.karaoke_filter: bool = False
         self.rotation_filter: bool = False
         self.tremolo_filter: bool = False
         self.vibrato_filter: bool = False
+        self.normalization_filter: bool = False
 
         # TODO Filter template list
         self.nigthcore_filter: bool = False

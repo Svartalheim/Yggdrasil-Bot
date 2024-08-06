@@ -1,5 +1,3 @@
-from re import sub
-
 from yarl import URL
 
 

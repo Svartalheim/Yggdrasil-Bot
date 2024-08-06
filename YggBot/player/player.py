@@ -67,6 +67,14 @@ class TrackPlayer(TrackPlayerBase):
         else:
             player = cast(CustomPlayer, interaction.user.guild.voice_client)
 
+        # TODO Enable normalization
+        if player.normal_default and not player.normalization_filter:
+            filters: Filters = player.filters
+            filters.plugin_filters.set(
+                **{'normalization': {'maxAmplitude': .5, 'adaptive': True}})
+
+            await player.set_filters(filters)
+
         # TODO Record interaction
         player.interaction = interaction
 
@@ -486,9 +494,9 @@ class TrackPlayer(TrackPlayerBase):
 
         return embed
 
-    # Filter
+     # Filter
     @TrackPlayerDecorator.record_interaction()
-    async def filters(self, interaction: Interaction, /, karaoke: bool = None, rotation: bool = None, tremolo: bool = None, vibrato: bool = None) -> Embed:
+    async def filters(self, interaction: Interaction, /, karaoke: bool = None, rotation: bool = None, tremolo: bool = None, vibrato: bool = None, normalization: bool = None) -> Embed:
         player: CustomPlayer = cast(
             CustomPlayer, interaction.user.guild.voice_client)
         filters: Filters = player.filters
@@ -538,6 +546,16 @@ class TrackPlayer(TrackPlayerBase):
             else:
                 filters.vibrato.reset()
 
+        def __filter_normalization(state: bool = False) -> None:
+            player.normalization_filter = state
+            player.normal_default = False
+
+            if state:
+                filters.plugin_filters.set(
+                    **{'normalization': {'maxAmplitude': .5, 'adaptive': True}})
+            else:
+                filters.plugin_filters.reset()
+
         if karaoke is not None:
             __filter_karaoke(karaoke)
             embed.add_field(name="Karaoke", value=str(karaoke))
@@ -553,6 +571,10 @@ class TrackPlayer(TrackPlayerBase):
         if vibrato is not None:
             __filter_vibrato(vibrato)
             embed.add_field(name="Vibrato", value=str(vibrato))
+
+        if normalization is not None:
+            __filter_normalization(normalization)
+            embed.add_field(name="Normalization", value=str(normalization))
 
         if not embed.fields:
             embed.description = "Nothing to apply"
