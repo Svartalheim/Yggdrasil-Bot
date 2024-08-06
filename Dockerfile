@@ -31,4 +31,4 @@ COPY . .
 # Update PATH to include pip-installed packages
 ENV PATH=/root/.local/bin:$PATH
 
-CMD ["python", "bot.py"]
+CMD ["python", "main.py"]
