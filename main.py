@@ -14,147 +14,153 @@ from config import YggConfig
 
 
 class YggTask:
+	async def _begin_loop_task(self):
+		if not self._change_activity.is_running():
+			self._change_activity.start()
 
-    async def _begin_loop_task(self):
-        if not self._change_activity.is_running():
-            self._change_activity.start()
+	@staticmethod
+	async def _connect_nodes(bot: commands.Bot) -> None:
+		await bot.wait_until_ready()
+		inactive_timeout: int = timedelta(minutes=30).total_seconds()
 
-    @staticmethod
-    async def _connect_nodes(bot: commands.Bot) -> None:
-        await bot.wait_until_ready()
-        inactive_timeout: int = timedelta(minutes=30).total_seconds()
+		def get_lavalink_nodes() -> list[Node]:
+			temp: list[Node] = list()
 
-        def get_lavalink_nodes() -> list[Node]:
-            temp: list[Node] = list()
+			server: list[str] = YggConfig.LAVALINK_SERVER.split(",")
+			server_pass: list[str] = YggConfig.LAVALINK_PASSWORD.split(",")
 
-            server: list[str] = YggConfig.LAVALINK_SERVER.split(',')
-            server_pass: list[str] = YggConfig.LAVALINK_PASSWORD.split(
-                ',')
+			if len(server) != len(server_pass):
+				YggUtil.simple_log(
+					"Host and Password length must match. Please check your config, make sure it divided by ','. Fallback into using one node"
+				)
+				temp.append(
+					Node(
+						uri=server[0],
+						password=server_pass[0],
+						inactive_player_timeout=inactive_timeout,
+					)
+				)
+				return temp
 
-            if len(server) != len(server_pass):
-                YggUtil.simple_log(
-                    "Host and Password length must match. Please check your config, make sure it divided by ','. Fallback into using one node")
-                temp.append(Node(uri=server[0], password=server_pass[0],
-                            inactive_player_timeout=inactive_timeout))
-                return temp
+			for s, p in zip(server, server_pass):
+				temp.append(
+					Node(uri=s, password=p, inactive_player_timeout=inactive_timeout)
+				)
 
-            for s, p in zip(server, server_pass):
-                temp.append(
-                    Node(uri=s, password=p, inactive_player_timeout=inactive_timeout))
+			return temp
 
-            return temp
+		await Pool.connect(nodes=get_lavalink_nodes(), client=bot, cache_capacity=20)
 
-        await Pool.connect(nodes=get_lavalink_nodes(), client=bot, cache_capacity=20)
+	@tasks.loop(seconds=60)
+	async def _change_activity(self: commands.Bot) -> None:
+		await bot.wait_until_ready()
+		member_count: int = len([x for x in self.get_all_members()])
 
-    @tasks.loop(seconds=60)
-    async def _change_activity(self: commands.Bot) -> None:
-        await bot.wait_until_ready()
-        member_count: int = len([x for x in self.get_all_members()])
+		async def __a() -> None:
+			await self.change_presence(
+				status=Status.idle,
+				activity=Activity(
+					type=ActivityType.playing,
+					name=f"with {member_count} Disciple",
+				),
+			)
 
-        async def __a() -> None:
-            await self.change_presence(
-                status=Status.idle,
-                activity=Activity(
-                    type=ActivityType.playing,
-                    name=f"with {member_count} Disciple",
-                ),
-            )
+		async def __b() -> None:
+			await self.change_presence(
+				status=Status.idle,
+				activity=Activity(
+					type=ActivityType.listening,
+					name="you",
+				),
+			)
 
-        async def __b() -> None:
-            await self.change_presence(
-                status=Status.idle,
-                activity=Activity(
-                    type=ActivityType.listening,
-                    name=f"you",
-                ),
-            )
+		async def __c() -> None:
+			competing_list = ["Hell Like Heaven", '"Flower on a High Peak"']
+			await self.change_presence(
+				status=Status.idle,
+				activity=Activity(
+					type=ActivityType.competing,
+					name=choice(competing_list),
+				),
+			)
 
-        async def __c() -> None:
-            competing_list = ["Hell Like Heaven", '"Flower on a High Peak"']
-            await self.change_presence(
-                status=Status.idle,
-                activity=Activity(
-                    type=ActivityType.competing,
-                    name=choice(competing_list),
-                ),
-            )
+		async def __d() -> None:
+			watching_list = ["Ragnarok"]
+			await self.change_presence(
+				status=Status.idle,
+				activity=Activity(
+					type=ActivityType.watching,
+					name=choice(watching_list),
+				),
+			)
 
-        async def __d() -> None:
-            watching_list = ["Ragnarok"]
-            await self.change_presence(
-                status=Status.idle,
-                activity=Activity(
-                    type=ActivityType.watching,
-                    name=choice(watching_list),
-                ),
-            )
+		async def __e() -> None:
+			await self.change_presence(
+				status=Status.idle,
+				activity=Activity(
+					type=ActivityType.listening,
+					name="Ignorance is Bliss",
+				),
+			)
 
-        async def __e() -> None:
-            await self.change_presence(
-                status=Status.idle,
-                activity=Activity(
-                    type=ActivityType.listening,
-                    name="Ignorance is Bliss",
-                ),
-            )
-
-        await choice([__a, __b, __c, __d, __e])()
+		await choice([__a, __b, __c, __d, __e])()
 
 
 class YggBase(commands.Bot):
-    async def _help_embed(self, server_name, bot_name) -> Embed:
-        desc: str = f"Here's a few feature that's available on {server_name}."
-        embed: Embed = Embed(
-            title=f"Commands for {server_name}",
-            description=desc,
-            color=YggUtil.convert_color(YggConfig.Color.GENERAL),
-        )
+	async def _help_embed(self, server_name, bot_name) -> Embed:
+		desc: str = f"Here's a few feature that's available on {server_name}."
+		embed: Embed = Embed(
+			title=f"Commands for {server_name}",
+			description=desc,
+			color=YggUtil.convert_color(YggConfig.Color.GENERAL),
+		)
 
-        for command in await self.tree.fetch_commands():
-            embed.add_field(
-                name=f"**/{command.name}**", value=command.description, inline=True
-            )
-        embed.set_author(name=self.user.name,
-                         icon_url=self.user.display_avatar)
-        embed.set_footer(
-            text=f" © {
-                bot_name} • Still under develop, if there is something wrong contact @svartalheim"
-        )
-        return embed
+		for command in await self.tree.fetch_commands():
+			embed.add_field(
+				name=f"**/{command.name}**", value=command.description, inline=True
+			)
+		embed.set_author(name=self.user.name, icon_url=self.user.display_avatar)
+		embed.set_footer(
+			text=f" © {
+				bot_name
+			} • Still under develop, if there is something wrong contact @svartalheim"
+		)
+		return embed
 
 
 class YggClient(YggBase, YggTask):
-    def __init__(self) -> None:
-        intents: Intents = Intents.default()
-        intents.members = True
-        intents.message_content = True
+	def __init__(self) -> None:
+		intents: Intents = Intents.default()
+		intents.members = True
+		intents.message_content = True
 
-        super().__init__(YggConfig.BOT_PREFIX, intents=intents)
+		super().__init__(YggConfig.BOT_PREFIX, intents=intents)
 
-        self.synced: bool = False
+		self.synced: bool = False
 
-    async def setup_hook(self) -> None:
-        self.session: ClientSession = ClientSession()
+	async def setup_hook(self) -> None:
+		self.session: ClientSession = ClientSession()
 
-        YggUtil.setup_log()
+		YggUtil.setup_log()
 
-        self.loop.create_task(self._connect_nodes(self))
+		self.loop.create_task(self._connect_nodes(self))
 
-        await self.load_extension("YggBot.command")
+		await self.load_extension("YggBot.command")
 
-        return await super().setup_hook()
+		return await super().setup_hook()
 
-    async def on_ready(self) -> None:
-        YggUtil.simple_log(
-            f"Logged as {self.user.name}, {self.user.id}, Member count: {
-                len([x for x in self.get_all_members()])}"
-        )
+	async def on_ready(self) -> None:
+		YggUtil.simple_log(
+			f"Logged as {self.user.name}, {self.user.id}, Member count: {
+				len([x for x in self.get_all_members()])
+			}"
+		)
 
-        if not self.synced:
-            await self.tree.sync()
-            self.synced = True
+		if not self.synced:
+			await self.tree.sync()
+			self.synced = True
 
-        await self._begin_loop_task()
+		await self._begin_loop_task()
 
 
 bot: commands.Bot = YggClient()
@@ -163,21 +169,19 @@ bot: commands.Bot = YggClient()
 @bot.tree.command(name="help", description="Help user to find command")
 @guild_only()
 async def _help(interaction: Interaction) -> None:
-    YggUtil.simple_log(
-        f"{interaction.guild.me.name} AKA {interaction.guild.me.nick}")
-    bot_name = ""
-    if interaction.guild.me.nick is None:
-        bot_name = interaction.guild.me.name
-    else:
-        bot_name = f"{interaction.guild.me.name} AKA {
-            interaction.guild.me.nick}"
-    await YggUtil.send_response(
-        interaction,
-        embed=await bot._help_embed(
-            interaction.guild.name,
-            bot_name,
-        ),
-    )
+	YggUtil.simple_log(f"{interaction.guild.me.name} AKA {interaction.guild.me.nick}")
+	bot_name = ""
+	if interaction.guild.me.nick is None:
+		bot_name = interaction.guild.me.name
+	else:
+		bot_name = f"{interaction.guild.me.name} AKA {interaction.guild.me.nick}"
+	await YggUtil.send_response(
+		interaction,
+		embed=await bot._help_embed(
+			interaction.guild.name,
+			bot_name,
+		),
+	)
 
 
 print(YggConfig.TOKEN, "ygtoken")

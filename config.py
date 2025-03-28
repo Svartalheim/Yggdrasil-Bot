@@ -3,24 +3,25 @@ from os import getenv
 
 # load_dotenv()
 
+
 class YggConfig:
-    BOT_NAME: str = "Yggdrasil Bot"
-    BOT_PREFIX: str = "!ygg"
-    TIMEZONE: str = "Asia/Jakarta"
-    
-    class Color:
-        SUCCESS: str = "198754"
-        FAILED: str = "CA0B00"
-        GENERAL: str = "E49B0F"
+	BOT_NAME: str = "Yggdrasil Bot"
+	BOT_PREFIX: str = "!ygg"
+	TIMEZONE: str = "Asia/Jakarta"
 
-    @staticmethod
-    def get_secret(key: str) -> str | int | None:
-        with open(getenv(key), 'r') as a:
-            return a.read()
+	class Color:
+		SUCCESS: str = "198754"
+		FAILED: str = "CA0B00"
+		GENERAL: str = "E49B0F"
 
-    TOKEN: str = get_secret('TOKEN')
+	@staticmethod
+	def get_secret(key: str) -> str | int | None:
+		with open(getenv(key), "r") as a:
+			return a.read()
 
-    LAVALINK_SERVER: str = getenv("LAVALINK_SERVER")
-    LAVALINK_PASSWORD: str = getenv("LAVALINK_PASSWORD")
+	TOKEN: str = get_secret("TOKEN")
 
-    KANTIN_YOYOK_ID: int = int(getenv("KANTIN_YOYOK_ID"))
+	LAVALINK_SERVER: str = getenv("LAVALINK_SERVER")
+	LAVALINK_PASSWORD: str = getenv("LAVALINK_PASSWORD")
+
+	KANTIN_YOYOK_ID: int = int(getenv("KANTIN_YOYOK_ID"))

@@ -5,8 +5,18 @@ on:
     branches:
       - revamp
 
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+  packages: write
+
 env:
   REGISTRY_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/yggdrasil-bot
+  EVENT: ${{ github.event_name }}
+  RELEASE_VERSION: ${{ github.event.release.tag_name }}
 
 jobs:
   build:
@@ -20,6 +30,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prepare
         run: |
@@ -48,6 +61,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
+          context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
@@ -86,7 +100,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY_IMAGE }}
           tags: |
-            type=raw,value=${{ vars.VERSION }}
+            ${{ env.EVENT == 'release' && 'type=semver,pattern={{version}}\ntype=semver,pattern={{major}}.{{minor}}' || 'type=raw,value=dev' }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

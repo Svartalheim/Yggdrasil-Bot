@@ -1,0 +1,30 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Python: Main Bot with Hot Reload",
+        "type": "debugpy",
+        "request": "launch",
+        "program": "${workspaceFolder}/main.py",
+        "python": "${command:python.interpreterPath}",
+        "console": "integratedTerminal",
+        "justMyCode": true,
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}"
+        },
+        "autoReload": {
+          "enabled": true,
+          "exclude": [
+            "**/.git/**",
+            "**/.vscode/**",
+            "**/.venv/**",
+            "**/__pycache__/**",
+            "**/.pytest_cache/**",
+            "**/.mypy_cache",
+            "**/.ruff_cache/**",
+            "**/.github/**",
+          ]
+        }
+      }
+    ]
+  }
