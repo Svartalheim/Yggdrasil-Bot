@@ -2,6 +2,9 @@
 FROM python:3.12-alpine as builder
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+# Install git for GitHub repo dependencies
+RUN apk add --no-cache git
+
 # Compile bytecode & System Python
 ENV UV_COMPILE_BYTECODE=1 UV_SYSTEM_PYTHON=1
 
