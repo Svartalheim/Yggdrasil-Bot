@@ -12,7 +12,7 @@ classifiers=[
 dependencies = [
     "discord-py[voice]==2.4.0",
     "pytz>=2025.2",
-    "wavelink==3.4.1",
+    "wavelink",
 ]
 
 [build-system]
@@ -36,3 +36,6 @@ target-version = "py312"
 [tool.ruff.format]
 indent-style = "tab"
 docstring-code-format = true
+
+[tool.uv.sources]
+wavelink = { git = "https://github.com/lleans/Wavelink", branch = "main" }
