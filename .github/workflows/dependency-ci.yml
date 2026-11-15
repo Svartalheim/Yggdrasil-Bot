@@ -1,0 +1,61 @@
+name: Dependency CI
+
+on:
+  pull_request:
+    branches:
+      - revamp
+
+permissions:
+  contents: read
+
+env:
+  UV_PROJECT_ENVIRONMENT: /tmp/ygg-venv
+
+jobs:
+  build:
+    name: Compile and build check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Compile check
+        run: uv run --no-sync python -m compileall -q YggBot main.py config.py
+
+      - name: Build Docker image (no push)
+        run: docker build -t yggdrasil-bot:ci .
+
+  auto-merge:
+    name: Auto-merge minor and patch updates
+    needs: build
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge after successful checks
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-patch'
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --merge --delete-branch --match-head-commit "$HEAD_SHA" "$PR_URL"

@@ -1,0 +1,44 @@
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    target-branch: "revamp"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # Only allow minor and patch updates; never bump a major version.
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+      # wavelink is a custom fork pinned in [tool.uv.sources]; manage it by hand.
+      - dependency-name: "wavelink"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    target-branch: "revamp"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    target-branch: "revamp"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "revamp"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
